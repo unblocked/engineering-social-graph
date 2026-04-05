@@ -3,7 +3,7 @@
 <!-- Badges -->
 <!-- [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE) -->
 <!-- [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/) -->
-<!-- [![Tests](https://img.shields.io/github/actions/workflow/status/OWNER/developer-social-graph/tests.yml?label=tests)](https://github.com/OWNER/developer-social-graph/actions) -->
+<!-- [![Tests](https://img.shields.io/github/actions/workflow/status/unblocked-aie/engineering-social-graph/tests.yml?label=tests)](https://github.com/unblocked-aie/engineering-social-graph/actions) -->
 
 Build a developer social graph from GitHub PR history. Identifies domain experts, detects team clusters, and generates interactive visualizations of how your engineering organization collaborates -- all from data already in your GitHub repos.
 
@@ -24,7 +24,7 @@ Build a developer social graph from GitHub PR history. Identifies domain experts
 
 ```bash
 # 1. Clone and build the binary
-git clone https://github.com/OWNER/developer-social-graph.git
+git clone https://github.com/unblocked-aie/engineering-social-graph.git
 cd developer-social-graph
 pip install poetry
 poetry install --with dev
@@ -43,7 +43,7 @@ That's it. `social-graph run` fetches PR data from GitHub, builds the collaborat
 ### Running from source (no binary)
 
 ```bash
-git clone https://github.com/OWNER/developer-social-graph.git
+git clone https://github.com/unblocked-aie/engineering-social-graph.git
 cd developer-social-graph
 pip install poetry && poetry install
 

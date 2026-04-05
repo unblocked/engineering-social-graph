@@ -2,7 +2,7 @@
 name = "social-graph"
 version = "0.1.0"
 description = "Build a company social graph from PR history to identify domain experts"
-authors = ["Peter Werry"]
+authors = ["Next Chapter Software Inc. (Unblocked)"]
 readme = "README.md"
 packages = [{include = "social_graph", from = "src"}]
 
