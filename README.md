@@ -25,7 +25,7 @@ Build a developer social graph from GitHub PR history. Identifies domain experts
 ```bash
 # 1. Clone and build the binary
 git clone https://github.com/unblocked-aie/engineering-social-graph.git
-cd developer-social-graph
+cd engineering-social-graph
 pip install poetry
 poetry install --with dev
 pyinstaller social-graph.spec
@@ -44,7 +44,7 @@ That's it. `social-graph run` fetches PR data from GitHub, builds the collaborat
 
 ```bash
 git clone https://github.com/unblocked-aie/engineering-social-graph.git
-cd developer-social-graph
+cd engineering-social-graph
 pip install poetry && poetry install
 
 # cd into any GitHub repo clone, then:
