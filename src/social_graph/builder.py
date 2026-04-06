@@ -79,7 +79,7 @@ def run_build(
 
         # Build a mapping from git author names and email prefixes to GitHub logins
         # so that compute_lines_from_git can resolve authors whose email prefix
-        # doesn't match their GitHub login (e.g., "andrey.petrov" → "apetrov").
+        # doesn't match their GitHub login (e.g., "jane.doe" → "jdoe").
         known_users: dict[str, str] = {}
         for pr in all_prs:
             login = pr.author.login
