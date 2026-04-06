@@ -81,16 +81,25 @@ def run_build(
         # so that compute_lines_from_git can resolve authors whose email prefix
         # doesn't match their GitHub login (e.g., "jane.doe" → "jdoe").
         known_users: dict[str, str] = {}
+        logins: set[str] = set()
         for pr in all_prs:
             login = pr.author.login
             known_users[login] = login
-            if pr.author.name:
-                known_users[pr.author.name] = login
+            logins.add(login)
             for interaction in pr.interactions:
                 ilogin = interaction.user.login
                 known_users[ilogin] = ilogin
-                if interaction.user.name:
-                    known_users[interaction.user.name] = ilogin
+                logins.add(ilogin)
+
+        # Second pass: add name mappings only where they don't collide
+        # with a known login (avoids misattribution when a display name
+        # matches another user's login).
+        for pr in all_prs:
+            if pr.author.name and pr.author.name not in logins:
+                known_users.setdefault(pr.author.name, pr.author.login)
+            for interaction in pr.interactions:
+                if interaction.user.name and interaction.user.name not in logins:
+                    known_users.setdefault(interaction.user.name, interaction.user.login)
 
         lines_by_user = compute_lines_from_git(repo_path, since_git, known_users=known_users)
         cache.save_lines_by_user(lines_by_user)

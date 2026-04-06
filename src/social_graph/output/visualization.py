@@ -113,15 +113,17 @@ def compute_lines_from_git(
     raw_stats: dict[str, int] = defaultdict(int)
     current_key = ""
 
-    # Format outputs: author name, author email, then numstat lines.
-    # We read name+email pairs, then resolve to the best key.
+    # Format: %aN then %aE per commit, so we alternate: name, email, numstat lines.
+    # Track state explicitly rather than sniffing content, since author names
+    # can contain "@".
     pending_name = ""
+    expect_email = False
     for line in result.stdout.splitlines():
         line = line.strip()
         if not line:
             continue
         if "\t" not in line:
-            if "@" in line:
+            if expect_email:
                 # This is the email line
                 email_prefix = line.split("@")[0]
                 # GitHub noreply format: "12345+username"
@@ -135,10 +137,13 @@ def compute_lines_from_git(
                 else:
                     current_key = email_prefix
                 pending_name = ""
+                expect_email = False
             else:
                 # This is the name line
                 pending_name = line
+                expect_email = True
         else:
+            expect_email = False
             parts = line.split("\t")
             if len(parts) == 3 and current_key:
                 added, deleted, _ = parts
