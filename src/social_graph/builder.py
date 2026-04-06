@@ -77,7 +77,22 @@ def run_build(
         log(f"[cyan]Step 3/6:[/cyan] Computing LOC from git log (since {since_git})...")
         from social_graph.output.visualization import compute_lines_from_git
 
-        lines_by_user = compute_lines_from_git(repo_path, since_git)
+        # Build a mapping from git author names and email prefixes to GitHub logins
+        # so that compute_lines_from_git can resolve authors whose email prefix
+        # doesn't match their GitHub login (e.g., "andrey.petrov" → "apetrov").
+        known_users: dict[str, str] = {}
+        for pr in all_prs:
+            login = pr.author.login
+            known_users[login] = login
+            if pr.author.name:
+                known_users[pr.author.name] = login
+            for interaction in pr.interactions:
+                ilogin = interaction.user.login
+                known_users[ilogin] = ilogin
+                if interaction.user.name:
+                    known_users[interaction.user.name] = ilogin
+
+        lines_by_user = compute_lines_from_git(repo_path, since_git, known_users=known_users)
         cache.save_lines_by_user(lines_by_user)
         top = sorted(lines_by_user.items(), key=lambda x: -x[1])[:5]
         for name, loc in top:

@@ -81,7 +81,11 @@ _CLUSTER_COLORS = [
 ]
 
 
-def compute_lines_from_git(repo_path: str, since: str = "6 months ago") -> dict[str, int]:
+def compute_lines_from_git(
+    repo_path: str,
+    since: str = "6 months ago",
+    known_users: dict[str, str] | None = None,
+) -> dict[str, int]:
     """Compute lines added+deleted per author using git log --numstat.
 
     This is far more accurate than PR-level stats because it covers all commits
@@ -89,41 +93,62 @@ def compute_lines_from_git(repo_path: str, since: str = "6 months ago") -> dict[
 
     Handles GitHub noreply emails like "12345+jdoe@users.noreply.github.com"
     by extracting the login portion and merging with plain email variants.
+
+    Args:
+        known_users: Optional mapping of {name_or_email_prefix: github_login}
+            built from PR data, used to resolve git authors whose email prefix
+            doesn't match their GitHub login.
     """
     import subprocess
     result = subprocess.run(
-        ["git", "-C", repo_path, "log", "--numstat", "--format=%aE", f"--since={since}"],
+        ["git", "-C", repo_path, "log", "--numstat", "--format=%aN%n%aE", f"--since={since}"],
         capture_output=True,
         text=True,
     )
     if result.returncode != 0:
         return {}
 
-    raw_stats: dict[str, int] = defaultdict(int)
-    current_author = ""
+    known_users = known_users or {}
 
+    raw_stats: dict[str, int] = defaultdict(int)
+    current_key = ""
+
+    # Format outputs: author name, author email, then numstat lines.
+    # We read name+email pairs, then resolve to the best key.
+    pending_name = ""
     for line in result.stdout.splitlines():
         line = line.strip()
         if not line:
             continue
         if "\t" not in line:
-            current_author = line.split("@")[0]
+            if "@" in line:
+                # This is the email line
+                email_prefix = line.split("@")[0]
+                # GitHub noreply format: "12345+username"
+                if "+" in email_prefix:
+                    email_prefix = email_prefix.split("+", 1)[1]
+                # Resolve to GitHub login: try email prefix first, then git author name
+                if email_prefix in known_users:
+                    current_key = known_users[email_prefix]
+                elif pending_name in known_users:
+                    current_key = known_users[pending_name]
+                else:
+                    current_key = email_prefix
+                pending_name = ""
+            else:
+                # This is the name line
+                pending_name = line
         else:
             parts = line.split("\t")
-            if len(parts) == 3 and current_author:
+            if len(parts) == 3 and current_key:
                 added, deleted, _ = parts
                 if added != "-" and deleted != "-":
-                    raw_stats[current_author] += int(added) + int(deleted)
+                    raw_stats[current_key] += int(added) + int(deleted)
 
-    # Merge aliases: "12345+jdoe" and "jdoe" → "jdoe"
+    # Merge any remaining aliases
     merged: dict[str, int] = defaultdict(int)
     for key, val in raw_stats.items():
-        # GitHub noreply format: "12345+username"
-        if "+" in key:
-            login = key.split("+", 1)[1]
-        else:
-            login = key
-        merged[login] += val
+        merged[key] += val
 
     return dict(merged)
 
