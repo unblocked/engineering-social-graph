@@ -52,17 +52,24 @@ def resolve_github_remote(repo_path: str) -> tuple[str, str]:
 # ---------------------------------------------------------------------------
 
 def _macos_keychain_get(service: str) -> str:
-    try:
-        result = subprocess.run(
-            ["security", "find-generic-password", "-a", KEYCHAIN_ACCOUNT, "-s", service, "-w"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        if result.returncode == 0:
-            return result.stdout.strip()
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        pass
+    # Try our own account first, then fall back to searching by service name
+    # only. This finds keys stored by other tools (e.g. Claude Code stores
+    # ANTHROPIC_API_KEY under its own account).
+    for args in (
+        ["-a", KEYCHAIN_ACCOUNT, "-s", service],
+        ["-s", service],
+    ):
+        try:
+            result = subprocess.run(
+                ["security", "find-generic-password", *args, "-w"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                return result.stdout.strip()
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            pass
     return ""
 
 
