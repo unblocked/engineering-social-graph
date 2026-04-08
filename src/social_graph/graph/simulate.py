@@ -17,8 +17,8 @@ Answers three classes of questions:
   to maximise knowledge distribution? Who should be their onboarding buddy
   based on social connectivity + area expertise?
 
-All simulations are pure functions over the cached graph data — no
-mutations, no API calls.
+All simulations are pure functions over the cached graph data — no side
+effects, no mutations, no API calls.
 """
 
 from __future__ import annotations
