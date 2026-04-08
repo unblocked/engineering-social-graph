@@ -7,10 +7,8 @@ from pathlib import Path
 
 import click
 from rich.console import Console
-from rich.panel import Panel
 
 from social_graph.config import DEFAULT_MIN_PR_RATE, Config, resolve_github_remote, secrets_set
-from social_graph.fetcher.cache import PRCache
 
 console = Console()
 

@@ -46,7 +46,7 @@ social-graph build            # fetch PRs, compute graph, detect teams
 social-graph viz              # render visualization (instant, no API calls)
 
 # To include all contributors in smaller repositories without high PR volume:
-# social-graph run --min-pr-rate 0.0
+social-graph run --min-pr-rate 0.0
 ```
 
 That's it. `social-graph run` fetches PR data from GitHub, builds the collaboration graph, detects teams, scores expertise, and opens an interactive visualization in your browser.
