@@ -14,6 +14,8 @@ DEFAULT_MODEL = "claude-haiku-4-5-20251001"
 
 KEYCHAIN_ACCOUNT = "social-graph"
 
+DEFAULT_MIN_PR_RATE = 7.0
+
 
 # ---------------------------------------------------------------------------
 # Git remote parsing
@@ -197,6 +199,7 @@ class Config:
     github_token: str = field(default_factory=_resolve_github_token)
     anthropic_api_key: str = ""
     cache_dir: Path = DEFAULT_CACHE_DIR
+    min_pr_rate: float = DEFAULT_MIN_PR_RATE
 
     def __post_init__(self) -> None:
         if not self.anthropic_api_key:

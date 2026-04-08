@@ -8,7 +8,7 @@ from pathlib import Path
 import click
 from rich.console import Console
 
-from social_graph.config import Config, resolve_github_remote, secrets_set
+from social_graph.config import DEFAULT_MIN_PR_RATE, Config, resolve_github_remote, secrets_set
 
 console = Console()
 
@@ -380,10 +380,12 @@ def experts_domains(ctx: click.Context, repo_path: str, auto_label: bool, output
 @cli.command("export")
 @click.option("--format", "fmt", type=click.Choice(["json", "graphml"]), default="json")
 @click.option("--output", "-o", default=None, help="Output file path.")
+@click.option("--min-pr-rate", default=DEFAULT_MIN_PR_RATE, type=float, help="Minimum avg PRs per month for an author/reviewer.")
 @click.pass_context
-def export_graph(ctx: click.Context, fmt: str, output: str | None) -> None:
+def export_graph(ctx: click.Context, fmt: str, output: str | None, min_pr_rate: float) -> None:
     """Export the social graph to JSON or GraphML."""
     config: Config = ctx.obj["config"]
+    config.min_pr_rate = min_pr_rate
 
     from social_graph.fetcher.cache import PRCache
     from social_graph.graph.social import build_social_graph
@@ -392,7 +394,7 @@ def export_graph(ctx: click.Context, fmt: str, output: str | None) -> None:
     cache = PRCache(config.cache_db_path)
     try:
         prs = cache.get_all_prs()
-        edges = build_social_graph(prs)
+        edges = build_social_graph(prs, min_pr_rate=config.min_pr_rate)
 
         if output is None:
             output = f"social-graph.{fmt}"
@@ -421,9 +423,11 @@ def export_graph(ctx: click.Context, fmt: str, output: str | None) -> None:
 @click.option("--limit", default=None, type=int, help="Max PRs to fetch.")
 @click.option("--fresh", is_flag=True, help="Ignore cache timestamps, re-fetch everything.")
 @click.option("--skip-fetch", is_flag=True, help="Skip PR fetching, rebuild from cached data only.")
+@click.option("--min-pr-rate", default=DEFAULT_MIN_PR_RATE, type=float, help="Minimum avg PRs per month for an author/reviewer.")
 @click.pass_context
-def build(ctx: click.Context, org: str | None, repo: tuple[str, ...], repo_path: str, since_prs: str | None, since_git: str, limit: int | None, fresh: bool, skip_fetch: bool) -> None:
+def build(ctx: click.Context, org: str | None, repo: tuple[str, ...], repo_path: str, since_prs: str | None, since_git: str, limit: int | None, fresh: bool, skip_fetch: bool, min_pr_rate: float) -> None:
     """Fetch PR data, compute social graph, detect teams."""
+    ctx.obj["config"].min_pr_rate = min_pr_rate
     _run_build(ctx, org, repo, repo_path, since_prs, since_git, limit, skip_fetch, fresh)
 
 
@@ -445,9 +449,11 @@ def viz(ctx: click.Context, output: str | None) -> None:
 @click.option("--fresh", is_flag=True, help="Ignore cache timestamps, re-fetch everything.")
 @click.option("--skip-fetch", is_flag=True, help="Skip PR fetching, rebuild from cached data only.")
 @click.option("--output", "-o", default=None, help="Output HTML file path.")
+@click.option("--min-pr-rate", default=DEFAULT_MIN_PR_RATE, type=float, help="Minimum avg PRs per month for an author/reviewer.")
 @click.pass_context
-def run(ctx: click.Context, org: str | None, repo: tuple[str, ...], repo_path: str, since_prs: str | None, since_git: str, limit: int | None, fresh: bool, skip_fetch: bool, output: str | None) -> None:
+def run(ctx: click.Context, org: str | None, repo: tuple[str, ...], repo_path: str, since_prs: str | None, since_git: str, limit: int | None, fresh: bool, skip_fetch: bool, output: str | None, min_pr_rate: float) -> None:
     """Build the social graph and open the visualization."""
+    ctx.obj["config"].min_pr_rate = min_pr_rate
     _run_build(ctx, org, repo, repo_path, since_prs, since_git, limit, skip_fetch, fresh)
     console.print()
     _run_viz(ctx, output)
