@@ -79,7 +79,7 @@ class DepartureReport:
     pairing_sessions: list[PairingSession]
     org_bus_factor_before: float  # avg across all areas
     org_bus_factor_after: float
-    critical_areas: int  # areas that drop to bus_factor 0 or 1
+    critical_areas: int  # areas that drop to bus_factor 0
     knowledge_monopolies: list[str]  # areas where this person is the ONLY expert
 
 
@@ -271,29 +271,39 @@ def simulate_departure(
         all_backfills.extend(area_backfills)
 
         # Generate pairing sessions for at-risk areas
-        if bf_after <= 1 and remaining:
-            mentee = remaining[0][0]
-            urgency = "critical" if bf_after == 0 else "high"
-            all_pairings.append(PairingSession(
-                mentor=login,
-                mentee=mentee,
-                area_name=area.name,
-                area_path=area.path,
-                urgency=urgency,
-                reason=f"bus factor drops to {bf_after}; @{mentee} is next in line",
-            ))
+        if bf_after <= 1:
+            if remaining:
+                mentee = remaining[0][0]
+                mentee_reason = "next in line"
+            elif area_backfills:
+                mentee = area_backfills[0].login
+                mentee_reason = "best backfill candidate"
+            else:
+                mentee = None
+                mentee_reason = ""
 
-            # Also pair with socially-connected people who could ramp up
-            for c in area_backfills[:3]:
-                if c.login != mentee and c.social_proximity > 0.2:
-                    all_pairings.append(PairingSession(
-                        mentor=login,
-                        mentee=c.login,
-                        area_name=area.name,
-                        area_path=area.path,
-                        urgency="medium",
-                        reason=f"social proximity {c.social_proximity:.0%} — can ramp up with pairing",
-                    ))
+            if mentee:
+                urgency = "critical" if bf_after == 0 else "high"
+                all_pairings.append(PairingSession(
+                    mentor=login,
+                    mentee=mentee,
+                    area_name=area.name,
+                    area_path=area.path,
+                    urgency=urgency,
+                    reason=f"bus factor drops to {bf_after}; @{mentee} is {mentee_reason}",
+                ))
+
+                # Also pair with socially-connected people who could ramp up
+                for c in area_backfills[:3]:
+                    if c.login != mentee and c.social_proximity > 0.2:
+                        all_pairings.append(PairingSession(
+                            mentor=login,
+                            mentee=c.login,
+                            area_name=area.name,
+                            area_path=area.path,
+                            urgency="medium",
+                            reason=f"social proximity {c.social_proximity:.0%} — can ramp up with pairing",
+                        ))
 
     # Sort area impacts: critical first
     status_order = {"critical": 0, "degraded": 1, "unchanged": 2, "improved": 3}
