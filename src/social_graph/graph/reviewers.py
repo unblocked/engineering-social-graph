@@ -99,6 +99,12 @@ def suggest_reviewers(
                     proximity.get(edge.author.login, 0), edge.weight * 0.5
                 )
 
+    # Normalize proximity to [0, 1] like the other signals
+    if proximity:
+        max_prox = max(proximity.values())
+        if max_prox > 0:
+            proximity = {k: v / max_prox for k, v in proximity.items()}
+
     # 3. Compute review load (how often someone appears as reviewer in edges)
     review_counts: dict[str, int] = defaultdict(int)
     for edge in edges:
