@@ -46,11 +46,16 @@ def fetch_repo_commits(
     """
     # Format: delimiter, hash, author name, author email, ISO date, parent hashes, body
     fmt = f"{_COMMIT_DELIM}%H%n%aN%n%aE%n%aI%n%P%n%B"
-    result = subprocess.run(
-        ["git", "-C", repo_path, "log", f"--format={fmt}", "--name-only", f"--since={since}"],
-        capture_output=True,
-        text=True,
-    )
+    try:
+        result = subprocess.run(
+            ["git", "-C", repo_path, "log", f"--format={fmt}", "--name-only", f"--since={since}"],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+    except subprocess.TimeoutExpired:
+        log("  [red]git log timed out after 120s[/red]")
+        return []
     if result.returncode != 0:
         log(f"  [red]git log failed:[/red] {result.stderr.strip()}")
         return []

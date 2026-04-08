@@ -367,18 +367,25 @@ class PRCache:
     # --- Commit cache methods ---
 
     def upsert_commit(self, commit: Commit) -> None:
-        self._conn.execute(
+        self.upsert_commits([commit])
+
+    def upsert_commits(self, commits: list[Commit]) -> None:
+        """Bulk-insert commits in a single transaction."""
+        self._conn.executemany(
             """INSERT OR REPLACE INTO commits
                (sha, repo, author_json, committed_at, files_json, coauthors_json)
                VALUES (?, ?, ?, ?, ?, ?)""",
-            (
-                commit.sha,
-                commit.repo,
-                _user_to_json(commit.author),
-                _dt_to_str(commit.committed_at),
-                json.dumps(commit.files),
-                json.dumps([_user_to_json(u) for u in commit.coauthors]),
-            ),
+            [
+                (
+                    c.sha,
+                    c.repo,
+                    _user_to_json(c.author),
+                    _dt_to_str(c.committed_at),
+                    json.dumps(c.files),
+                    json.dumps([_user_to_json(u) for u in c.coauthors]),
+                )
+                for c in commits
+            ],
         )
         self._conn.commit()
 

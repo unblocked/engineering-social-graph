@@ -183,8 +183,7 @@ def _build_commit_mode(cache, org, repos, repo_path, since_git, log):
     full_name = f"{org}/{repos[0]}" if repos else org
     commits = fetch_repo_commits(repo_path, repo_name=full_name, since=since_git, log=log)
     cache.delete_commits(repo=full_name)
-    for c in commits:
-        cache.upsert_commit(c)
+    cache.upsert_commits(commits)
     log(f"  Cached {len(commits)} commits.")
 
     log("[cyan]Step 2/6:[/cyan] Building social graph from commits...")

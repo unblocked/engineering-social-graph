@@ -61,6 +61,13 @@ def suggest_reviewers(
     if mode not in ("prs", "commits"):
         raise ValueError(f"mode must be 'prs' or 'commits', got {mode!r}")
 
+    # Build a mapping from email-prefix → GitHub login so that expertise
+    # keys (email-based) can be unified with social-edge keys (GitHub logins).
+    email_to_login: dict[str, str] = {}
+    for edge in edges:
+        for login in (edge.author.login, edge.reviewer.login):
+            email_to_login.setdefault(login, login)
+
     # 1. Aggregate expertise across all changed paths
     expertise_scores: dict[str, float] = defaultdict(float)
     expertise_counts: dict[str, int] = defaultdict(int)
@@ -69,7 +76,9 @@ def suggest_reviewers(
         rankings = experts_for_path(str(repo_path), path, top_n=20)
         for r in rankings:
             # experts_for_path returns emails as login; normalize to prefix
-            login = _login_from_email(r.user.login)
+            email_prefix = _login_from_email(r.user.login)
+            # Map to GitHub login if known, otherwise keep the prefix
+            login = email_to_login.get(email_prefix, email_prefix)
             expertise_scores[login] += r.score
             expertise_counts[login] += 1
 
@@ -167,6 +176,9 @@ def co_commit_proximity(
         Mapping of login -> proximity score in [0, 1].
     """
     raw_scores: dict[str, float] = defaultdict(float)
+    # Note: this uses the decay window (~336 days) which is intentionally wider
+    # than the default --since-git ("6 months ago") to capture longer-term
+    # co-commit relationships, with recency handled by time decay.
     since = f"{THREE_SIGMA_DAYS} days ago"
 
     for path in changed_paths:
