@@ -210,8 +210,11 @@ class GitHubFetcher:
                 if not pr:
                     continue
 
-                if since and pr.updated_at < since:
-                    _log(f"  PR #{pr.number} updated {pr.updated_at.date()} is before cutoff {since.date()}, stopping.")
+                if since and pr.updated_at <= since:
+                    _log(
+                        f"  PR #{pr.number} updated {pr.updated_at.isoformat()} is at or before cutoff "
+                        f"{since.isoformat()}, stopping."
+                    )
                     stopped_early = True
                     break
 

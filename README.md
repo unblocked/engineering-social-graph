@@ -31,8 +31,9 @@ pip install poetry
 poetry install --with dev
 poetry run pyinstaller social-graph.spec
 
-# Move the binary onto your PATH
+# Move the binary onto your PATH (use sudo if you get Permission denied)
 mv dist/social-graph /usr/local/bin/    # macOS/Linux
+# Alternative without sudo: mkdir -p ~/.local/bin && mv dist/social-graph ~/.local/bin/  (then ensure ~/.local/bin is on PATH)
 ```
 
 ### 2. Run it
@@ -61,6 +62,7 @@ poetry run social-graph run --repo-path /path/to/your/repo
 ### Requirements
 
 - A local clone of a GitHub repository (org and repo are auto-detected from the git remote)
+- That repository must exist on GitHub and be visible to your token (private org repos need access). If PR fetch returns no data, the graph has no edges and `viz` / `run` cannot open the visualization.
 - A GitHub token (`gh auth token` or `GITHUB_TOKEN` environment variable)
 - Python 3.11+ (only needed if building from source)
 - Optional: `ANTHROPIC_API_KEY` for LLM-generated team labels (falls back to code area names)
@@ -277,7 +279,7 @@ src/social_graph/
     cache.py          SQLite storage layer
   graph/
     social.py         Social graph construction algorithm
-    expertise.py      File/repo expertise from GitHub API
+    expertise.py      Domain experts from git log and cached merged PR counts
     code_expertise.py Area expertise detection from git log
   output/
     grid.py           HTML generation (all visualization tabs)
@@ -298,7 +300,7 @@ poetry run ruff check src/
 
 ```bash
 poetry install --with dev
-pyinstaller social-graph.spec
+poetry run pyinstaller social-graph.spec
 # Binary is at dist/social-graph (macOS/Linux) or dist/social-graph.exe (Windows)
 ```
 

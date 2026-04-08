@@ -302,21 +302,25 @@ def _derive_team_labels(communities: list[set[str]], areas, names: dict[str, str
         distinctive.sort(key=lambda x: -x[2])
         team_area_data[team_idx] = distinctive[:10]
 
-    # Try LLM labeling
+    def _area_fallback_labels() -> dict[int, str]:
+        labels: dict[int, str] = {}
+        for team_idx in range(len(communities)):
+            top = team_area_data.get(team_idx, [])
+            if top:
+                labels[team_idx] = " · ".join(name for name, _, _ in top[:3])
+            else:
+                labels[team_idx] = f"Team {team_idx + 1}"
+        return labels
+
     if api_key is None:
         api_key = os.environ.get("ANTHROPIC_API_KEY", "")
     if api_key:
-        return _llm_team_labels(communities, team_area_data, names, api_key)
+        try:
+            return _llm_team_labels(communities, team_area_data, names, api_key)
+        except Exception:
+            return _area_fallback_labels()
 
-    # Fallback: raw area names
-    labels: dict[int, str] = {}
-    for team_idx in range(len(communities)):
-        top = team_area_data.get(team_idx, [])
-        if top:
-            labels[team_idx] = " · ".join(name for name, _, _ in top[:3])
-        else:
-            labels[team_idx] = f"Team {team_idx + 1}"
-    return labels
+    return _area_fallback_labels()
 
 
 def _llm_team_labels(

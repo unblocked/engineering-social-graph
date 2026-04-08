@@ -155,6 +155,18 @@ class PRCache:
         )
         self._conn.commit()
 
+    def clear_last_synced(self, repo: str) -> None:
+        self._conn.execute("DELETE FROM sync_meta WHERE repo = ?", (repo,))
+        self._conn.commit()
+
+    def get_max_pr_updated_at(self, repo: str) -> datetime | None:
+        row = self._conn.execute(
+            "SELECT MAX(updated_at) FROM pull_requests WHERE repo = ?", (repo,)
+        ).fetchone()
+        if not row or row[0] is None:
+            return None
+        return _str_to_dt(row[0])
+
     def upsert_pr(self, pr: PullRequest) -> None:
         pr_id = f"{pr.repo}#{pr.number}"
         self._conn.execute(

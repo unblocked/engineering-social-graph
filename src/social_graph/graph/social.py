@@ -16,7 +16,7 @@ from social_graph.models import PullRequest, PullRequestState, SocialEdge, User
 from social_graph.scoring import MINIMUM_SOCIAL_WEIGHT, score_pr_interactions
 
 
-MIN_PRS_PER_MONTH = 7.0
+MIN_PRS_PER_MONTH = 0.0
 
 
 def build_social_graph(
