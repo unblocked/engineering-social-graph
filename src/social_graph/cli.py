@@ -374,6 +374,96 @@ def experts_domains(ctx: click.Context, repo_path: str, auto_label: bool, output
 
 
 # ---------------------------------------------------------------------------
+# suggest-reviewers
+# ---------------------------------------------------------------------------
+
+@cli.command("suggest-reviewers")
+@click.argument("paths", nargs=-1, required=True)
+@click.option("--repo-path", default=".", help="Path to local git repo clone (default: current directory).")
+@click.option("--author", default=None, help="PR author login (excluded from suggestions, auto-detected from git).")
+@click.option("--top", default=5, help="Number of reviewers to suggest.")
+@click.pass_context
+def suggest_reviewers_cmd(ctx: click.Context, paths: tuple[str, ...], repo_path: str, author: str | None, top: int) -> None:
+    """Suggest the best reviewers for changed files.
+
+    \b
+    Uses expertise scores + social graph proximity to rank reviewers.
+    Requires a prior build (social-graph build).
+
+    \b
+    Examples:
+        social-graph suggest-reviewers src/social_graph/scoring.py
+        social-graph suggest-reviewers src/social_graph/graph/ src/social_graph/models.py
+        social-graph suggest-reviewers --author pwerry src/social_graph/cli.py
+    """
+    import subprocess as sp
+
+    config: Config = ctx.obj["config"]
+
+    from social_graph.fetcher.cache import PRCache
+
+    cache = PRCache(config.cache_db_path)
+    try:
+        if not cache.has_build_data():
+            console.print("[red]No build data found.[/red] Run [cyan]social-graph build[/cyan] first.")
+            raise SystemExit(1)
+
+        edges = cache.load_social_edges()
+
+        # Auto-detect author from git config if not provided
+        if author is None:
+            result = sp.run(
+                ["git", "-C", repo_path, "config", "user.email"],
+                capture_output=True, text=True, timeout=5,
+            )
+            if result.returncode == 0:
+                email = result.stdout.strip()
+                author = email.split("@")[0]
+                if "+" in author:
+                    author = author.split("+", 1)[1]
+
+        from social_graph.graph.reviewers import suggest_reviewers
+
+        suggestions = suggest_reviewers(
+            repo_path=repo_path,
+            changed_paths=list(paths),
+            edges=edges,
+            author_login=author,
+            top_n=top,
+        )
+
+        if not suggestions:
+            console.print("[yellow]No reviewer suggestions found.[/yellow] Do the paths have git history?")
+            return
+
+        from rich.table import Table
+
+        table = Table(title=f"Suggested reviewers for {len(paths)} path(s)")
+        table.add_column("#", style="dim", width=3)
+        table.add_column("Reviewer", style="cyan")
+        table.add_column("Score", justify="right", style="green")
+        table.add_column("Expertise", justify="right")
+        table.add_column("Proximity", justify="right")
+        table.add_column("Why", style="dim")
+
+        for i, s in enumerate(suggestions, 1):
+            table.add_row(
+                str(i),
+                s["login"],
+                f"{s['score']:.3f}",
+                f"{s['expertise']:.2f}",
+                f"{s['proximity']:.2f}",
+                s["reason"],
+            )
+
+        console.print(table)
+        if author:
+            console.print(f"\n[dim]PR author: {author} (excluded from suggestions)[/dim]")
+    finally:
+        cache.close()
+
+
+# ---------------------------------------------------------------------------
 # export
 # ---------------------------------------------------------------------------
 
