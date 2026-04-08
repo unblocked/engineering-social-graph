@@ -122,3 +122,24 @@ def test_merged_pr_counts():
         assert counts[author2] == 1
 
         cache.close()
+
+
+def test_has_build_data_depends_on_completed_build_metadata():
+    with tempfile.TemporaryDirectory() as tmp:
+        cache = PRCache(Path(tmp) / "test.db")
+
+        assert not cache.has_build_data()
+
+        # A completed build can legitimately produce zero social edges for
+        # a small or low-activity repo, so build completion must not depend
+        # on the social_edges table being non-empty.
+        cache.save_build_meta({
+            "built_at": datetime.now(timezone.utc).isoformat(),
+            "edge_count": "0",
+            "area_count": "0",
+            "community_count": "0",
+        })
+
+        assert cache.has_build_data()
+
+        cache.close()
