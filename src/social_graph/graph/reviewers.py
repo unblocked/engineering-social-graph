@@ -43,6 +43,7 @@ def suggest_reviewers(
     edges: list[SocialEdge],
     author_login: str | None = None,
     top_n: int = 5,
+    known_users: dict[str, str] | None = None,
 ) -> list[dict]:
     """Suggest reviewers for a set of changed file paths.
 
@@ -52,6 +53,9 @@ def suggest_reviewers(
         edges: Social graph edges (from cache).
         author_login: The PR author's login (excluded from suggestions).
         top_n: Number of reviewers to return.
+        known_users: Optional mapping of name/email-prefix → GitHub login,
+            built from PR data during build. Used to resolve git-log email
+            prefixes to GitHub logins.
 
     Returns:
         List of dicts with keys: login, score, expertise, proximity, reason.
@@ -59,6 +63,8 @@ def suggest_reviewers(
     # Build a mapping from email-prefix → GitHub login so that expertise
     # keys (email-based) can be unified with social-edge keys (GitHub logins).
     email_to_login: dict[str, str] = {}
+    if known_users:
+        email_to_login.update(known_users)
     for edge in edges:
         for login in (edge.author.login, edge.reviewer.login):
             email_to_login.setdefault(login, login)

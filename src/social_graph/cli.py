@@ -410,6 +410,23 @@ def suggest_reviewers_cmd(ctx: click.Context, paths: tuple[str, ...], repo_path:
 
         edges = cache.load_social_edges()
 
+        # Build email-prefix → GitHub login mapping from PR data
+        all_prs = cache.get_all_prs()
+        known_users: dict[str, str] = {}
+        logins: set[str] = set()
+        for pr in all_prs:
+            known_users[pr.author.login] = pr.author.login
+            logins.add(pr.author.login)
+            for interaction in pr.interactions:
+                known_users[interaction.user.login] = interaction.user.login
+                logins.add(interaction.user.login)
+        for pr in all_prs:
+            if pr.author.name and pr.author.name not in logins:
+                known_users.setdefault(pr.author.name, pr.author.login)
+            for interaction in pr.interactions:
+                if interaction.user.name and interaction.user.name not in logins:
+                    known_users.setdefault(interaction.user.name, interaction.user.login)
+
         # Auto-detect author from git config if not provided
         if author is None:
             try:
@@ -424,6 +441,8 @@ def suggest_reviewers_cmd(ctx: click.Context, paths: tuple[str, ...], repo_path:
                 author = email.split("@")[0]
                 if "+" in author:
                     author = author.split("+", 1)[1]
+                # Resolve email prefix to GitHub login if possible
+                author = known_users.get(author, author)
 
         from social_graph.graph.reviewers import suggest_reviewers
 
@@ -433,6 +452,7 @@ def suggest_reviewers_cmd(ctx: click.Context, paths: tuple[str, ...], repo_path:
             edges=edges,
             author_login=author,
             top_n=top,
+            known_users=known_users,
         )
 
         if not suggestions:
