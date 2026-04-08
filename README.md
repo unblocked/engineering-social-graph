@@ -22,40 +22,40 @@ Build a developer social graph from GitHub PR history. Identifies domain experts
 
 ## Quick Start
 
+### 1. Build the CLI
+
 ```bash
-# 1. Clone and build the binary
 git clone https://github.com/unblocked-aie/engineering-social-graph.git
 cd engineering-social-graph
 pip install poetry
 poetry install --with dev
-pyinstaller social-graph.spec
+poetry run pyinstaller social-graph.spec
 
-# 2. Move the binary onto your PATH
+# Move the binary onto your PATH
 mv dist/social-graph /usr/local/bin/    # macOS/Linux
-
-# 3. Navigate into any GitHub repo and run
-cd /path/to/your/repo
-social-graph run
 ```
 
-That's it. `social-graph run` fetches PR data from GitHub, builds the collaboration graph, detects teams, scores expertise, and opens an interactive visualization in your browser.
-
-### Running from source (no binary)
+### 2. Run it
 
 ```bash
-git clone https://github.com/unblocked-aie/engineering-social-graph.git
-cd engineering-social-graph
-pip install poetry && poetry install
-
-# cd into any GitHub repo clone, then:
+cd /path/to/your/repo
 social-graph run
 
 # Or split the pipeline:
 social-graph build            # fetch PRs, compute graph, detect teams
 social-graph viz              # render visualization (instant, no API calls)
+```
 
-# Point at a repo elsewhere:
-social-graph run --repo-path /path/to/local/clone
+That's it. `social-graph run` fetches PR data from GitHub, builds the collaboration graph, detects teams, scores expertise, and opens an interactive visualization in your browser.
+
+### Running from source (development)
+
+If you're working on the tool itself, you can skip the binary build and run directly via Poetry:
+
+```bash
+cd engineering-social-graph
+poetry install
+poetry run social-graph run --repo-path /path/to/your/repo
 ```
 
 ### Requirements
