@@ -34,6 +34,7 @@ def suggest_reviewers(
     edges: list[SocialEdge],
     author_login: str | None = None,
     top_n: int = 5,
+    mode: str = "prs",
 ) -> list[dict]:
     """Suggest reviewers for a set of changed file paths.
 
@@ -65,9 +66,11 @@ def suggest_reviewers(
     max_exp = max(avg_expertise.values()) if avg_expertise else 1.0
     norm_expertise = {k: v / max_exp for k, v in avg_expertise.items()}
 
-    # 2. Compute social proximity to the author
+    # 2. Compute social proximity
     proximity: dict[str, float] = {}
-    if author_login:
+    if mode == "commits":
+        proximity = co_commit_proximity(repo_path, changed_paths, author_login)
+    elif author_login:
         for edge in edges:
             if edge.author.login == author_login:
                 proximity[edge.reviewer.login] = max(
@@ -78,12 +81,15 @@ def suggest_reviewers(
                     proximity.get(edge.author.login, 0), edge.weight * 0.5
                 )
 
-    # 3. Compute review load (how often someone appears as reviewer in edges)
-    review_counts: dict[str, int] = defaultdict(int)
-    for edge in edges:
-        review_counts[edge.reviewer.login] += 1
-    max_reviews = max(review_counts.values()) if review_counts else 1
-    norm_load = {k: v / max_reviews for k, v in review_counts.items()}
+    # 3. Compute review load
+    if mode == "commits":
+        norm_load = {}  # no meaningful load signal from commits alone
+    else:
+        review_counts: dict[str, int] = defaultdict(int)
+        for edge in edges:
+            review_counts[edge.reviewer.login] += 1
+        max_reviews = max(review_counts.values()) if review_counts else 1
+        norm_load = {k: v / max_reviews for k, v in review_counts.items()}
 
     # 4. Combine scores for all candidates
     all_candidates = set(norm_expertise.keys()) | set(proximity.keys())
