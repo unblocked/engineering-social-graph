@@ -56,6 +56,13 @@ def suggest_reviewers(
     Returns:
         List of dicts with keys: login, score, expertise, proximity, reason.
     """
+    # Build a mapping from email-prefix → GitHub login so that expertise
+    # keys (email-based) can be unified with social-edge keys (GitHub logins).
+    email_to_login: dict[str, str] = {}
+    for edge in edges:
+        for login in (edge.author.login, edge.reviewer.login):
+            email_to_login.setdefault(login, login)
+
     # 1. Aggregate expertise across all changed paths
     expertise_scores: dict[str, float] = defaultdict(float)
     expertise_counts: dict[str, int] = defaultdict(int)
@@ -63,7 +70,9 @@ def suggest_reviewers(
     for path in changed_paths:
         rankings = experts_for_path(str(repo_path), path, top_n=20)
         for r in rankings:
-            login = _login_from_email(r.user.login)
+            email_prefix = _login_from_email(r.user.login)
+            # Map to GitHub login if known, otherwise keep the prefix
+            login = email_to_login.get(email_prefix, email_prefix)
             expertise_scores[login] += r.score
             expertise_counts[login] += 1
 

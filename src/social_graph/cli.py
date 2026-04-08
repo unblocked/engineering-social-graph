@@ -412,11 +412,14 @@ def suggest_reviewers_cmd(ctx: click.Context, paths: tuple[str, ...], repo_path:
 
         # Auto-detect author from git config if not provided
         if author is None:
-            result = sp.run(
-                ["git", "-C", repo_path, "config", "user.email"],
-                capture_output=True, text=True, timeout=5,
-            )
-            if result.returncode == 0:
+            try:
+                result = sp.run(
+                    ["git", "-C", repo_path, "config", "user.email"],
+                    capture_output=True, text=True, timeout=5,
+                )
+            except sp.TimeoutExpired:
+                result = None
+            if result and result.returncode == 0:
                 email = result.stdout.strip()
                 author = email.split("@")[0]
                 if "+" in author:
