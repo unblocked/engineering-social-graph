@@ -217,3 +217,61 @@ class TestCoCommitProximity:
             changed_paths=["src/main.py"],
         )
         assert result == {}
+
+
+class TestCommitMode:
+    """Tests for mode='commits' in suggest_reviewers."""
+
+    @patch("social_graph.graph.reviewers.experts_for_path", side_effect=_mock_experts)
+    @patch(
+        "social_graph.graph.reviewers.co_commit_proximity",
+        return_value={"bob": 0.8, "charlie": 0.3},
+    )
+    def test_commit_mode_uses_co_commit_proximity(self, mock_co, mock_exp):
+        """mode='commits' should delegate proximity to co_commit_proximity."""
+        results = suggest_reviewers(
+            repo_path="/fake",
+            changed_paths=["src/main.py"],
+            edges=[],
+            author_login="author1",
+            mode="commits",
+        )
+        mock_co.assert_called_once_with("/fake", ["src/main.py"], "author1")
+        result_map = {r["login"]: r for r in results}
+        assert result_map["bob"]["proximity"] == 0.8
+        assert result_map["charlie"]["proximity"] == 0.3
+
+    @patch("social_graph.graph.reviewers.experts_for_path", side_effect=_mock_experts)
+    def test_pr_mode_is_default(self, mock_exp):
+        """Calling without mode should use PR edges (default behavior)."""
+        edges = [
+            _make_edge("author1", "alice", 0.9),
+            _make_edge("author1", "bob", 0.5),
+        ]
+        results = suggest_reviewers(
+            repo_path="/fake",
+            changed_paths=["src/main.py"],
+            edges=edges,
+            author_login="author1",
+        )
+        assert len(results) > 0
+        result_map = {r["login"]: r for r in results}
+        assert result_map["alice"]["proximity"] == 0.9
+
+    @patch("social_graph.graph.reviewers.experts_for_path", side_effect=_mock_experts)
+    @patch(
+        "social_graph.graph.reviewers.co_commit_proximity",
+        return_value={"bob": 0.5},
+    )
+    def test_commit_mode_no_edges_needed(self, mock_co, mock_exp):
+        """mode='commits' should work with an empty edges list."""
+        results = suggest_reviewers(
+            repo_path="/fake",
+            changed_paths=["src/main.py"],
+            edges=[],
+            author_login="author1",
+            mode="commits",
+        )
+        assert len(results) > 0
+        logins = [r["login"] for r in results]
+        assert "bob" in logins
