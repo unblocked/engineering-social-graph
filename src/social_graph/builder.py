@@ -69,7 +69,7 @@ def run_build(
         from social_graph.graph.social import build_social_graph
 
         all_prs = cache.get_all_prs()
-        edges = build_social_graph(all_prs)
+        edges = build_social_graph(all_prs, min_pr_rate=config.min_pr_rate)
         cache.save_social_edges(edges)
         log(f"  {len(edges)} edges.")
 

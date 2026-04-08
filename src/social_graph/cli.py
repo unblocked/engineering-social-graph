@@ -421,9 +421,11 @@ def export_graph(ctx: click.Context, fmt: str, output: str | None) -> None:
 @click.option("--limit", default=None, type=int, help="Max PRs to fetch.")
 @click.option("--fresh", is_flag=True, help="Ignore cache timestamps, re-fetch everything.")
 @click.option("--skip-fetch", is_flag=True, help="Skip PR fetching, rebuild from cached data only.")
+@click.option("--min-pr-rate", default=7.0, type=float, help="Minimum avg PRs per month for an author/reviewer.")
 @click.pass_context
-def build(ctx: click.Context, org: str | None, repo: tuple[str, ...], repo_path: str, since_prs: str | None, since_git: str, limit: int | None, fresh: bool, skip_fetch: bool) -> None:
+def build(ctx: click.Context, org: str | None, repo: tuple[str, ...], repo_path: str, since_prs: str | None, since_git: str, limit: int | None, fresh: bool, skip_fetch: bool, min_pr_rate: float) -> None:
     """Fetch PR data, compute social graph, detect teams."""
+    ctx.obj["config"].min_pr_rate = min_pr_rate
     _run_build(ctx, org, repo, repo_path, since_prs, since_git, limit, skip_fetch, fresh)
 
 
@@ -445,9 +447,11 @@ def viz(ctx: click.Context, output: str | None) -> None:
 @click.option("--fresh", is_flag=True, help="Ignore cache timestamps, re-fetch everything.")
 @click.option("--skip-fetch", is_flag=True, help="Skip PR fetching, rebuild from cached data only.")
 @click.option("--output", "-o", default=None, help="Output HTML file path.")
+@click.option("--min-pr-rate", default=7.0, type=float, help="Minimum avg PRs per month for an author/reviewer.")
 @click.pass_context
-def run(ctx: click.Context, org: str | None, repo: tuple[str, ...], repo_path: str, since_prs: str | None, since_git: str, limit: int | None, fresh: bool, skip_fetch: bool, output: str | None) -> None:
+def run(ctx: click.Context, org: str | None, repo: tuple[str, ...], repo_path: str, since_prs: str | None, since_git: str, limit: int | None, fresh: bool, skip_fetch: bool, output: str | None, min_pr_rate: float) -> None:
     """Build the social graph and open the visualization."""
+    ctx.obj["config"].min_pr_rate = min_pr_rate
     _run_build(ctx, org, repo, repo_path, since_prs, since_git, limit, skip_fetch, fresh)
     console.print()
     _run_viz(ctx, output)
