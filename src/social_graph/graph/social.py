@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 
 import networkx as nx
 
+from social_graph.config import DEFAULT_MIN_PR_RATE
 from social_graph.decay import THREE_SIGMA_DAYS, days_since, exponential_time_decay
 from social_graph.models import PullRequest, PullRequestState, SocialEdge, User
 from social_graph.scoring import MINIMUM_SOCIAL_WEIGHT, score_pr_interactions
@@ -19,7 +20,7 @@ from social_graph.scoring import MINIMUM_SOCIAL_WEIGHT, score_pr_interactions
 def build_social_graph(
     pull_requests: list[PullRequest],
     now: datetime | None = None,
-    min_pr_rate: float = 7.0,
+    min_pr_rate: float = DEFAULT_MIN_PR_RATE,
 ) -> list[SocialEdge]:
     """Build weighted social edges from PR interactions.
 
