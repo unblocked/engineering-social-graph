@@ -9,7 +9,6 @@ import click
 from rich.console import Console
 
 from social_graph.config import Config, resolve_github_remote, secrets_set
-from social_graph.models import BuildMode
 
 console = Console()
 
@@ -105,12 +104,8 @@ def status(ctx: click.Context) -> None:
 
         console.print("[bold]Build data[/bold]")
         console.print(f"  Last built:      {meta.get('built_at', 'unknown')[:19]}")
-        console.print(f"  Mode:            {meta.get('mode', 'pr')}")
         console.print(f"  Repos:           {meta.get('repos', '?')}")
-        if meta.get('mode') == 'commit':
-            console.print(f"  Commits:         {meta.get('commit_count', '?')}")
-        else:
-            console.print(f"  PRs:             {meta.get('pr_count', '?')}")
+        console.print(f"  PRs:             {meta.get('pr_count', '?')}")
         console.print(f"  Edges:           {meta.get('edge_count', '?')}")
         console.print(f"  Code areas:      {meta.get('area_count', '?')}")
         console.print(f"  Communities:     {meta.get('community_count', '?')}")
@@ -508,8 +503,6 @@ def suggest_reviewers_cmd(ctx: click.Context, paths: tuple[str, ...], repo_path:
 # ---------------------------------------------------------------------------
 
 @cli.command()
-@click.option("--mode", "mode_str", type=click.Choice(["pr", "commit", "auto"]), default="auto",
-              help="Data source: 'pr' (GitHub PRs), 'commit' (git log), 'auto' (detect).")
 @click.option("--org", default=None, help="GitHub organization (auto-detected from git remote).")
 @click.option("--repo", multiple=True, help="Repository name (auto-detected from git remote).")
 @click.option("--repo-path", default=".", help="Path to local git repo clone (default: current directory).")
@@ -519,9 +512,9 @@ def suggest_reviewers_cmd(ctx: click.Context, paths: tuple[str, ...], repo_path:
 @click.option("--fresh", is_flag=True, help="Ignore cache timestamps, re-fetch everything.")
 @click.option("--skip-fetch", is_flag=True, help="Skip PR fetching, rebuild from cached data only.")
 @click.pass_context
-def build(ctx: click.Context, mode_str: str, org: str | None, repo: tuple[str, ...], repo_path: str, since_prs: str | None, since_git: str, limit: int | None, fresh: bool, skip_fetch: bool) -> None:
-    """Fetch PR data or parse commits, compute social graph, detect teams."""
-    _run_build(ctx, org, repo, repo_path, since_prs, since_git, limit, skip_fetch, fresh, mode_str=mode_str)
+def build(ctx: click.Context, org: str | None, repo: tuple[str, ...], repo_path: str, since_prs: str | None, since_git: str, limit: int | None, fresh: bool, skip_fetch: bool) -> None:
+    """Fetch PR data, compute social graph, detect teams."""
+    _run_build(ctx, org, repo, repo_path, since_prs, since_git, limit, skip_fetch, fresh)
 
 
 @cli.command()
@@ -533,8 +526,6 @@ def viz(ctx: click.Context, output: str | None) -> None:
 
 
 @cli.command()
-@click.option("--mode", "mode_str", type=click.Choice(["pr", "commit", "auto"]), default="auto",
-              help="Data source: 'pr' (GitHub PRs), 'commit' (git log), 'auto' (detect).")
 @click.option("--org", default=None, help="GitHub organization (auto-detected from git remote).")
 @click.option("--repo", multiple=True, help="Repository name (auto-detected from git remote).")
 @click.option("--repo-path", default=".", help="Path to local git repo clone (default: current directory).")
@@ -545,9 +536,9 @@ def viz(ctx: click.Context, output: str | None) -> None:
 @click.option("--skip-fetch", is_flag=True, help="Skip PR fetching, rebuild from cached data only.")
 @click.option("--output", "-o", default=None, help="Output HTML file path.")
 @click.pass_context
-def run(ctx: click.Context, mode_str: str, org: str | None, repo: tuple[str, ...], repo_path: str, since_prs: str | None, since_git: str, limit: int | None, fresh: bool, skip_fetch: bool, output: str | None) -> None:
+def run(ctx: click.Context, org: str | None, repo: tuple[str, ...], repo_path: str, since_prs: str | None, since_git: str, limit: int | None, fresh: bool, skip_fetch: bool, output: str | None) -> None:
     """Build the social graph and open the visualization."""
-    _run_build(ctx, org, repo, repo_path, since_prs, since_git, limit, skip_fetch, fresh, mode_str=mode_str)
+    _run_build(ctx, org, repo, repo_path, since_prs, since_git, limit, skip_fetch, fresh)
     console.print()
     _run_viz(ctx, output)
 
@@ -572,19 +563,16 @@ def _resolve_org_repo(repo_path: str, org: str | None, repo: tuple[str, ...]) ->
     return resolved_org, resolved_repos
 
 
-def _run_build(ctx: click.Context, org: str | None, repo: tuple[str, ...], repo_path: str, since_prs: str | None, since_git: str, limit: int | None, skip_fetch: bool = False, fresh: bool = False, mode_str: str = "auto") -> None:
+def _run_build(ctx: click.Context, org: str | None, repo: tuple[str, ...], repo_path: str, since_prs: str | None, since_git: str, limit: int | None, skip_fetch: bool = False, fresh: bool = False) -> None:
     if fresh and skip_fetch:
         console.print("[red]Error:[/red] --fresh and --skip-fetch are mutually exclusive.")
         raise SystemExit(1)
-
-    mode = BuildMode(mode_str)
 
     config: Config = ctx.obj["config"]
     if not config.anthropic_api_key:
         console.print("[yellow]Note:[/yellow] No Anthropic API key — team labels will use code area names instead of AI.")
         console.print("  Run [cyan]social-graph auth --anthropic KEY[/cyan] to enable AI labels.\n")
-    # Only require GitHub token for PR mode (not commit or auto-fallback)
-    if mode == BuildMode.PR and not skip_fetch and not config.github_token:
+    if not skip_fetch and not config.github_token:
         console.print("[red]Error:[/red] No GitHub token found.")
         console.print("Run [cyan]social-graph auth --github TOKEN[/cyan] or authenticate with [cyan]gh auth login[/cyan].")
         raise SystemExit(1)
@@ -598,7 +586,6 @@ def _run_build(ctx: click.Context, org: str | None, repo: tuple[str, ...], repo_
         org=resolved_org,
         repos=resolved_repos,
         repo_path=repo_path,
-        mode=mode,
         since_prs=since_prs,
         since_git=since_git,
         limit=limit,
