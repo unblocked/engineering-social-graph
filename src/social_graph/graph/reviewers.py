@@ -118,7 +118,7 @@ def suggest_reviewers(
             reasons.append("close collaborator")
         elif prox > 0.2:
             reasons.append("has reviewed your work")
-        if load < 0.3:
+        if norm_load and load < 0.3:
             reasons.append("low review load")
 
         results.append({
