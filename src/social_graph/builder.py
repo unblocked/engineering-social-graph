@@ -16,6 +16,7 @@ from typing import Callable
 
 from social_graph.config import Config
 from social_graph.fetcher.cache import PRCache
+from social_graph.models import PullRequest
 
 
 def run_build(
@@ -51,24 +52,36 @@ def run_build(
                 fetch_since = since_dt
                 if fetch_since is None and not fresh:
                     fetch_since = cache.get_last_synced(full_name)
+                    if fetch_since is not None and cache.get_max_pr_updated_at(full_name) is None:
+                        log(
+                            "[yellow]  No cached PRs but a sync cursor exists; "
+                            "fetching full history.[/yellow]"
+                        )
+                        cache.clear_last_synced(full_name)
+                        fetch_since = None
 
                 if fetch_since:
-                    log(f"  Fetching PRs for {full_name} since {fetch_since.date()}...")
+                    log(f"  Fetching PRs for {full_name} since {fetch_since.isoformat()}...")
                 else:
                     log(f"  Fetching PRs for {full_name}...")
 
                 prs = fetcher.fetch_repo_prs(full_name, since=fetch_since, limit=limit)
                 for pr in prs:
                     cache.upsert_pr(pr)
-                if prs:
-                    cache.set_last_synced(full_name, datetime.now(timezone.utc))
-                log(f"  Cached {len(prs)} PRs.")
+                max_updated = cache.get_max_pr_updated_at(full_name)
+                if max_updated:
+                    cache.set_last_synced(full_name, max_updated)
+                elif cache.get_last_synced(full_name) is not None:
+                    cache.clear_last_synced(full_name)
+                log(f"  Upserted {len(prs)} PRs this run.")
 
-        # Step 2: Build social graph
+        # Step 2: Build social graph (only PRs for the repos in this build — not the whole cache DB)
         log("[cyan]Step 2/6:[/cyan] Building social graph...")
         from social_graph.graph.social import build_social_graph
 
-        all_prs = cache.get_all_prs()
+        all_prs: list[PullRequest] = []
+        for repo_name in repos:
+            all_prs.extend(cache.get_prs(f"{org}/{repo_name}"))
         edges = build_social_graph(all_prs, min_pr_rate=config.min_pr_rate)
         cache.save_social_edges(edges)
         log(f"  {len(edges)} edges.")
