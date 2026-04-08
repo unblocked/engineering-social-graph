@@ -1,4 +1,5 @@
 .claude/
+.idea/
 __pycache__/
 *.py[cod]
 *.egg-info/
@@ -10,4 +11,3 @@ build/
 *.db
 *.html
 lib/
-poetry.lock

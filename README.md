@@ -27,9 +27,8 @@ Build a developer social graph from GitHub PR history. Identifies domain experts
 ```bash
 git clone https://github.com/unblocked-aie/engineering-social-graph.git
 cd engineering-social-graph
-pip install poetry
-poetry install --with dev
-poetry run pyinstaller social-graph.spec
+uv sync --group dev --extra llm --extra keyring
+uv run pyinstaller social-graph.spec
 
 # Move the binary onto your PATH
 mv dist/social-graph /usr/local/bin/    # macOS/Linux
@@ -50,12 +49,12 @@ That's it. `social-graph run` fetches PR data from GitHub, builds the collaborat
 
 ### Running from source (development)
 
-If you're working on the tool itself, you can skip the binary build and run directly via Poetry:
+If you're working on the tool itself, you can skip the binary build and run directly via `uv`:
 
 ```bash
 cd engineering-social-graph
-poetry install
-poetry run social-graph run --repo-path /path/to/your/repo
+uv sync
+uv run social-graph run --repo-path /path/to/your/repo
 ```
 
 ### Requirements
@@ -64,6 +63,7 @@ poetry run social-graph run --repo-path /path/to/your/repo
 - A GitHub token (`gh auth token` or `GITHUB_TOKEN` environment variable)
 - Python 3.11+ (only needed if building from source)
 - Optional: `ANTHROPIC_API_KEY` for LLM-generated team labels (falls back to code area names)
+- Optional: install the `llm` extra for AI-generated labels and the `keyring` extra for Linux keyring integration
 
 ## How It Works
 
@@ -289,16 +289,16 @@ src/social_graph/
 ## Development
 
 ```bash
-poetry install --with dev
-poetry run pytest -v
-poetry run ruff check src/
+uv sync --group dev
+uv run pytest -v
+uv run ruff check src/
 ```
 
 ### Building the Binary
 
 ```bash
-poetry install --with dev
-pyinstaller social-graph.spec
+uv sync --group dev --extra llm --extra keyring
+uv run pyinstaller social-graph.spec
 # Binary is at dist/social-graph (macOS/Linux) or dist/social-graph.exe (Windows)
 ```
 
@@ -307,12 +307,12 @@ pyinstaller social-graph.spec
 Contributions are welcome! Here's how to get started:
 
 1. **Fork** the repository and create a feature branch from `main`
-2. **Install** dev dependencies: `poetry install --with dev`
+2. **Install** dev dependencies: `uv sync --group dev`
 3. **Make your changes** and add tests for new functionality
 4. **Run checks** before submitting:
    ```bash
-   poetry run pytest -v
-   poetry run ruff check src/
+   uv run pytest -v
+   uv run ruff check src/
    ```
 5. **Open a pull request** with a clear description of the change and its motivation
 
