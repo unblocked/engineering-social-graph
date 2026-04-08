@@ -349,5 +349,7 @@ class PRCache:
         return {r[0]: r[1] for r in rows}
 
     def has_build_data(self) -> bool:
-        row = self._conn.execute("SELECT COUNT(*) FROM social_edges").fetchone()
-        return row[0] > 0
+        row = self._conn.execute(
+            "SELECT 1 FROM build_meta WHERE key = 'built_at' LIMIT 1"
+        ).fetchone()
+        return row is not None
