@@ -527,6 +527,13 @@ _PAGE_TEMPLATE = """\
   .expert-score-val {{ font-size: 12px; color: #8b949e; font-variant-numeric: tabular-nums; min-width: 32px; }}
   .expert-detail {{ grid-column: 1 / -1; font-size: 11px; color: #6e7681; }}
 
+  .graph-find-toolbar {{ display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 12px; background: #161b22; border-bottom: 1px solid #30363d; flex-shrink: 0; }}
+  .graph-find-toolbar input[type="search"] {{ flex: 1; min-width: 140px; max-width: 320px; padding: 8px 12px; font-size: 13px; border: 1px solid #30363d; border-radius: 6px; background: #0d1117; color: #c9d1d9; }}
+  .graph-find-toolbar input[type="search"]::placeholder {{ color: #6e7681; }}
+  .graph-find-toolbar button {{ padding: 8px 14px; font-size: 13px; border-radius: 6px; border: 1px solid #30363d; background: #21262d; color: #c9d1d9; cursor: pointer; }}
+  .graph-find-toolbar button:hover {{ background: #30363d; }}
+  .graph-person-search-status {{ font-size: 11px; color: #8b949e; padding: 0 12px 8px; min-height: 16px; flex-shrink: 0; }}
+
   #tab-graph.active {{ padding: 0; margin: 0 -24px -24px; }}
 </style>
 </head>
@@ -594,10 +601,18 @@ _PAGE_TEMPLATE = """\
 
 
 _SIGMA_EMBED = """\
-<div style="display:flex;height:calc(100vh - 90px);min-height:500px;">
-  <div id="sigma-container" style="flex:1;height:100%;background:#1a1a2e;"></div>
-  <div id="sigma-sidebar" style="width:320px;height:100%;padding:16px;overflow-y:auto;font-size:13px;border-left:1px solid #30363d;background:#161b22;">
-    <p style="color:#8b949e;font-size:12px;">Hover to highlight connections. Click a node for details.</p>
+<div class="sigma-graph-page" style="display:flex;height:calc(100vh - 90px);min-height:500px;">
+  <div class="sigma-graph-main" style="display:flex;flex-direction:column;flex:1;min-width:0;min-height:0;">
+    <div id="graph-find-toolbar" class="graph-find-toolbar">
+      <input type="search" id="graph-person-search" placeholder="Find by name or @login" autocomplete="off" aria-label="Find person on graph">
+      <button type="button" id="graph-person-focus-btn">Focus</button>
+      <button type="button" id="graph-person-clear-btn">Clear</button>
+    </div>
+    <div id="graph-person-search-status" class="graph-person-search-status" role="status"></div>
+    <div id="sigma-container" style="flex:1;min-height:200px;background:#1a1a2e;"></div>
+  </div>
+  <div id="sigma-sidebar" style="width:320px;height:100%;padding:16px;overflow-y:auto;font-size:13px;border-left:1px solid #30363d;background:#161b22;flex-shrink:0;">
+    <p style="color:#8b949e;font-size:12px;">Search to focus someone, or hover to highlight. Click a node for details.</p>
     <div id="sigma-node-info" style="display:none;">
       <hr style="border:none;border-top:1px solid #30363d;margin:12px 0;">
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
@@ -766,6 +781,16 @@ rankedTeams.forEach(c => {
 
 const container = document.getElementById('sigma-container');
 let hoveredNode, hoveredNeighbors;
+let focusNode, focusNeighbors;
+
+function highlightNode() {
+  return hoveredNode || focusNode;
+}
+function highlightNeighbors() {
+  if (hoveredNode) return hoveredNeighbors;
+  if (focusNode) return focusNeighbors;
+  return null;
+}
 
 const renderer = new SigmaClass(graph, container, {
   zoomingRatio: 1.02,
@@ -773,15 +798,18 @@ const renderer = new SigmaClass(graph, container, {
   labelRenderedSizeThreshold: 6, labelColor: { color: '#c9d1d9' },
   nodeReducer: (node, data) => {
     const res = { ...data };
-    if (hoveredNode) {
-      if (hoveredNode !== node && (!hoveredNeighbors || !hoveredNeighbors.has(node))) { res.color = '#222'; res.label = ''; }
+    const hn = highlightNode();
+    const neigh = highlightNeighbors();
+    if (hn) {
+      if (hn !== node && (!neigh || !neigh.has(node))) { res.color = '#222'; res.label = ''; }
       else { res.label = data.label; res.zIndex = 1; }
     }
     return res;
   },
   edgeReducer: (edge, data) => {
     const res = { ...data };
-    if (hoveredNode) { if (!graph.extremities(edge).includes(hoveredNode)) res.hidden = true; else { res.color = '#fff'; res.forceLabel = true; } }
+    const hn = highlightNode();
+    if (hn) { if (!graph.extremities(edge).includes(hn)) res.hidden = true; else { res.color = '#fff'; res.forceLabel = true; } }
     return res;
   },
   defaultDrawNodeHover: (ctx, data) => {
@@ -867,6 +895,75 @@ setTimeout(() => renderer.refresh(), 100);
 renderer.on('enterNode', ({ node }) => { hoveredNode = node; hoveredNeighbors = new Set(graph.neighbors(node)); renderer.refresh({ skipIndexation: true }); });
 renderer.on('leaveNode', () => { hoveredNode = undefined; hoveredNeighbors = undefined; renderer.refresh({ skipIndexation: true }); });
 
+function setSearchStatus(text) {
+  const el = document.getElementById('graph-person-search-status');
+  if (el) el.textContent = text || '';
+}
+
+function findMatchingNode(rawQuery) {
+  const q = rawQuery.trim().toLowerCase().replace(/^@/, '');
+  if (!q) return { nodeId: null, message: 'Enter a name or login.' };
+  const exact = graphData.nodes.find((n) => n.login.toLowerCase() === q);
+  if (exact) return { nodeId: exact.id, message: '' };
+  const substr = graphData.nodes.filter((n) =>
+    n.label.toLowerCase().includes(q) || n.login.toLowerCase().includes(q)
+  );
+  if (substr.length === 0) return { nodeId: null, message: 'No match.' };
+  if (substr.length === 1) return { nodeId: substr[0].id, message: '' };
+  return {
+    nodeId: substr[0].id,
+    message: 'Multiple matches (' + substr.length + '); showing first — refine search.',
+  };
+}
+
+function moveCameraToNode(nodeId) {
+  const attrs = graph.getNodeAttributes(nodeId);
+  const cam = renderer.getCamera();
+  const state = cam.getState();
+  const targetRatio = Math.max(0.12, Math.min(state.ratio * 0.5, 0.45));
+  const target = { ...state, x: attrs.x, y: attrs.y, ratio: targetRatio };
+  if (typeof cam.animate === 'function') {
+    cam.animate(target, { duration: 480 });
+  } else {
+    cam.setState(target);
+    renderer.refresh();
+  }
+}
+
+function applyGraphFocus(nodeId) {
+  focusNode = nodeId;
+  focusNeighbors = new Set(graph.neighbors(nodeId));
+  showNodeDetails(nodeId);
+  moveCameraToNode(nodeId);
+  renderer.refresh({ skipIndexation: true });
+}
+
+function clearGraphFocus() {
+  focusNode = undefined;
+  focusNeighbors = undefined;
+  setSearchStatus('');
+  document.getElementById('sigma-node-info').style.display = 'none';
+  renderer.refresh({ skipIndexation: true });
+}
+
+function focusFromSearch() {
+  const input = document.getElementById('graph-person-search');
+  const q = input ? input.value : '';
+  const result = findMatchingNode(q);
+  if (!result.nodeId) {
+    setSearchStatus(result.message || 'No match.');
+    return;
+  }
+  setSearchStatus(result.message || '');
+  applyGraphFocus(result.nodeId);
+}
+
+document.getElementById('graph-person-focus-btn').addEventListener('click', focusFromSearch);
+document.getElementById('graph-person-clear-btn').addEventListener('click', clearGraphFocus);
+document.getElementById('graph-person-search').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') focusFromSearch();
+});
+
 function barColor(w) { return w > 0.7 ? '#50c878' : w > 0.3 ? '#4e9ee8' : '#8b949e'; }
 function fillList(id, data) {
   const el = document.getElementById(id); el.innerHTML = '';
@@ -881,8 +978,9 @@ function fillList(id, data) {
   if (!Object.keys(data).length) el.innerHTML = '<li style="color:#555;font-size:12px;">None</li>';
 }
 
-renderer.on('clickNode', ({ node }) => {
-  const nd = nodeDataById.get(node); if (!nd) return;
+function showNodeDetails(nodeId) {
+  const nd = nodeDataById.get(nodeId);
+  if (!nd) return;
   const av = document.getElementById('sigma-avatar');
   if (nd.avatarUrl) { av.src = nd.avatarUrl; av.style.display = 'block'; } else av.style.display = 'none';
   document.getElementById('sigma-name').textContent = nd.label;
@@ -898,8 +996,14 @@ renderer.on('clickNode', ({ node }) => {
   fillList('sigma-given', nd.reviewsGiven);
   fillList('sigma-received', nd.reviewsReceived);
   document.getElementById('sigma-node-info').style.display = 'block';
+}
+
+renderer.on('clickNode', ({ node }) => { showNodeDetails(node); });
+renderer.on('clickStage', () => {
+  if (!focusNode) {
+    document.getElementById('sigma-node-info').style.display = 'none';
+  }
 });
-renderer.on('clickStage', () => { document.getElementById('sigma-node-info').style.display = 'none'; });
 
 } // end initSigma
 
