@@ -9,6 +9,7 @@ import click
 from rich.console import Console
 
 from social_graph.config import Config, resolve_github_remote, secrets_set
+from social_graph.models import BuildMode
 
 console = Console()
 
@@ -104,8 +105,12 @@ def status(ctx: click.Context) -> None:
 
         console.print("[bold]Build data[/bold]")
         console.print(f"  Last built:      {meta.get('built_at', 'unknown')[:19]}")
+        console.print(f"  Mode:            {meta.get('mode', 'pr')}")
         console.print(f"  Repos:           {meta.get('repos', '?')}")
-        console.print(f"  PRs:             {meta.get('pr_count', '?')}")
+        if meta.get('mode') == 'commit':
+            console.print(f"  Commits:         {meta.get('commit_count', '?')}")
+        else:
+            console.print(f"  PRs:             {meta.get('pr_count', '?')}")
         console.print(f"  Edges:           {meta.get('edge_count', '?')}")
         console.print(f"  Code areas:      {meta.get('area_count', '?')}")
         console.print(f"  Communities:     {meta.get('community_count', '?')}")
@@ -409,10 +414,102 @@ def export_graph(ctx: click.Context, fmt: str, output: str | None) -> None:
 
 
 # ---------------------------------------------------------------------------
+# suggest-reviewers
+# ---------------------------------------------------------------------------
+
+@cli.command("suggest-reviewers")
+@click.argument("paths", nargs=-1, required=True)
+@click.option("--repo-path", default=".", help="Path to the local git repo.")
+@click.option("--author", default=None, help="PR author login (auto-detected from git config).")
+@click.option("--top", default=5, help="Number of reviewers to suggest.")
+@click.option("--mode", type=click.Choice(["prs", "commits"]), default="prs",
+              help="Source for proximity signal: 'prs' (requires build) or 'commits' (git log only).")
+@click.pass_context
+def suggest_reviewers_cmd(ctx: click.Context, paths: tuple[str, ...], repo_path: str, author: str | None, top: int, mode: str) -> None:
+    """Suggest the best reviewers for changed files.
+
+    \b
+    Uses expertise scores + social graph proximity to rank reviewers.
+    Default mode (prs) requires a prior build; commit mode works from git log only.
+
+    \b
+    Examples:
+        social-graph suggest-reviewers src/social_graph/scoring.py
+        social-graph suggest-reviewers --mode commits src/social_graph/graph/
+        social-graph suggest-reviewers --author pwerry src/social_graph/cli.py
+    """
+    import subprocess as sp
+    config: Config = ctx.obj["config"]
+
+    edges = []
+    if mode == "prs":
+        from social_graph.fetcher.cache import PRCache
+        cache = PRCache(config.cache_db_path)
+        try:
+            if not cache.has_build_data():
+                console.print("[red]No build data found.[/red] Run [cyan]social-graph build[/cyan] first, or use [cyan]--mode commits[/cyan].")
+                raise SystemExit(1)
+            edges = cache.load_social_edges()
+        finally:
+            cache.close()
+
+    # Auto-detect author from git config if not provided
+    if author is None:
+        result = sp.run(
+            ["git", "-C", repo_path, "config", "user.email"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode == 0:
+            email = result.stdout.strip()
+            author = email.split("@")[0]
+            if "+" in author:
+                author = author.split("+", 1)[1]
+
+    from social_graph.graph.reviewers import suggest_reviewers
+
+    suggestions = suggest_reviewers(
+        repo_path=repo_path,
+        changed_paths=list(paths),
+        edges=edges,
+        author_login=author,
+        top_n=top,
+        mode=mode,
+    )
+
+    if not suggestions:
+        console.print("[yellow]No reviewer candidates found for the given paths.[/yellow]")
+        return
+
+    from rich.table import Table
+
+    table = Table(title="Suggested Reviewers")
+    table.add_column("#", style="dim", justify="right")
+    table.add_column("Login", style="cyan")
+    table.add_column("Score", justify="right", style="magenta")
+    table.add_column("Expertise", justify="right")
+    table.add_column("Proximity", justify="right")
+    table.add_column("Why", style="dim")
+
+    for i, s in enumerate(suggestions, 1):
+        table.add_row(
+            str(i),
+            s["login"],
+            f"{s['score']:.3f}",
+            f"{s['expertise']:.3f}",
+            f"{s['proximity']:.3f}",
+            s["reason"],
+        )
+
+    console.print(table)
+
+
+# ---------------------------------------------------------------------------
 # build / viz / run — core pipeline
 # ---------------------------------------------------------------------------
 
 @cli.command()
+@click.option("--mode", "mode_str", type=click.Choice(["pr", "commit", "auto"]), default="auto",
+              help="Data source: 'pr' (GitHub PRs), 'commit' (git log), 'auto' (detect).")
 @click.option("--org", default=None, help="GitHub organization (auto-detected from git remote).")
 @click.option("--repo", multiple=True, help="Repository name (auto-detected from git remote).")
 @click.option("--repo-path", default=".", help="Path to local git repo clone (default: current directory).")
@@ -422,9 +519,9 @@ def export_graph(ctx: click.Context, fmt: str, output: str | None) -> None:
 @click.option("--fresh", is_flag=True, help="Ignore cache timestamps, re-fetch everything.")
 @click.option("--skip-fetch", is_flag=True, help="Skip PR fetching, rebuild from cached data only.")
 @click.pass_context
-def build(ctx: click.Context, org: str | None, repo: tuple[str, ...], repo_path: str, since_prs: str | None, since_git: str, limit: int | None, fresh: bool, skip_fetch: bool) -> None:
-    """Fetch PR data, compute social graph, detect teams."""
-    _run_build(ctx, org, repo, repo_path, since_prs, since_git, limit, skip_fetch, fresh)
+def build(ctx: click.Context, mode_str: str, org: str | None, repo: tuple[str, ...], repo_path: str, since_prs: str | None, since_git: str, limit: int | None, fresh: bool, skip_fetch: bool) -> None:
+    """Fetch PR data or parse commits, compute social graph, detect teams."""
+    _run_build(ctx, org, repo, repo_path, since_prs, since_git, limit, skip_fetch, fresh, mode_str=mode_str)
 
 
 @cli.command()
@@ -436,6 +533,8 @@ def viz(ctx: click.Context, output: str | None) -> None:
 
 
 @cli.command()
+@click.option("--mode", "mode_str", type=click.Choice(["pr", "commit", "auto"]), default="auto",
+              help="Data source: 'pr' (GitHub PRs), 'commit' (git log), 'auto' (detect).")
 @click.option("--org", default=None, help="GitHub organization (auto-detected from git remote).")
 @click.option("--repo", multiple=True, help="Repository name (auto-detected from git remote).")
 @click.option("--repo-path", default=".", help="Path to local git repo clone (default: current directory).")
@@ -446,9 +545,9 @@ def viz(ctx: click.Context, output: str | None) -> None:
 @click.option("--skip-fetch", is_flag=True, help="Skip PR fetching, rebuild from cached data only.")
 @click.option("--output", "-o", default=None, help="Output HTML file path.")
 @click.pass_context
-def run(ctx: click.Context, org: str | None, repo: tuple[str, ...], repo_path: str, since_prs: str | None, since_git: str, limit: int | None, fresh: bool, skip_fetch: bool, output: str | None) -> None:
+def run(ctx: click.Context, mode_str: str, org: str | None, repo: tuple[str, ...], repo_path: str, since_prs: str | None, since_git: str, limit: int | None, fresh: bool, skip_fetch: bool, output: str | None) -> None:
     """Build the social graph and open the visualization."""
-    _run_build(ctx, org, repo, repo_path, since_prs, since_git, limit, skip_fetch, fresh)
+    _run_build(ctx, org, repo, repo_path, since_prs, since_git, limit, skip_fetch, fresh, mode_str=mode_str)
     console.print()
     _run_viz(ctx, output)
 
@@ -473,16 +572,19 @@ def _resolve_org_repo(repo_path: str, org: str | None, repo: tuple[str, ...]) ->
     return resolved_org, resolved_repos
 
 
-def _run_build(ctx: click.Context, org: str | None, repo: tuple[str, ...], repo_path: str, since_prs: str | None, since_git: str, limit: int | None, skip_fetch: bool = False, fresh: bool = False) -> None:
+def _run_build(ctx: click.Context, org: str | None, repo: tuple[str, ...], repo_path: str, since_prs: str | None, since_git: str, limit: int | None, skip_fetch: bool = False, fresh: bool = False, mode_str: str = "auto") -> None:
     if fresh and skip_fetch:
         console.print("[red]Error:[/red] --fresh and --skip-fetch are mutually exclusive.")
         raise SystemExit(1)
+
+    mode = BuildMode(mode_str)
 
     config: Config = ctx.obj["config"]
     if not config.anthropic_api_key:
         console.print("[yellow]Note:[/yellow] No Anthropic API key — team labels will use code area names instead of AI.")
         console.print("  Run [cyan]social-graph auth --anthropic KEY[/cyan] to enable AI labels.\n")
-    if not skip_fetch and not config.github_token:
+    # Only require GitHub token for PR mode (not commit or auto-fallback)
+    if mode == BuildMode.PR and not skip_fetch and not config.github_token:
         console.print("[red]Error:[/red] No GitHub token found.")
         console.print("Run [cyan]social-graph auth --github TOKEN[/cyan] or authenticate with [cyan]gh auth login[/cyan].")
         raise SystemExit(1)
@@ -496,6 +598,7 @@ def _run_build(ctx: click.Context, org: str | None, repo: tuple[str, ...], repo_
         org=resolved_org,
         repos=resolved_repos,
         repo_path=repo_path,
+        mode=mode,
         since_prs=since_prs,
         since_git=since_git,
         limit=limit,
