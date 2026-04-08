@@ -761,8 +761,7 @@ def export_graph(ctx: click.Context, fmt: str, output: str | None, min_pr_rate: 
 @click.pass_context
 def build(ctx: click.Context, org: str | None, repo: tuple[str, ...], repo_path: str, since_prs: str | None, since_git: str, limit: int | None, fresh: bool, skip_fetch: bool, min_pr_rate: float) -> None:
     """Fetch PR data, compute social graph, detect teams."""
-    ctx.obj["config"].min_pr_rate = min_pr_rate
-    _run_build(ctx, org, repo, repo_path, since_prs, since_git, limit, skip_fetch, fresh)
+    _run_build(ctx, org, repo, repo_path, since_prs, since_git, limit, skip_fetch, fresh, min_pr_rate)
 
 
 @cli.command()
@@ -782,13 +781,12 @@ def viz(ctx: click.Context, output: str | None) -> None:
 @click.option("--limit", default=None, type=int, help="Max PRs to fetch.")
 @click.option("--fresh", is_flag=True, help="Ignore cache timestamps, re-fetch everything.")
 @click.option("--skip-fetch", is_flag=True, help="Skip PR fetching, rebuild from cached data only.")
-@click.option("--output", "-o", default=None, help="Output HTML file path.")
 @click.option("--min-pr-rate", default=DEFAULT_MIN_PR_RATE, type=float, help="Minimum avg PRs per month for an author/reviewer.")
+@click.option("--output", "-o", default=None, help="Output HTML file path.")
 @click.pass_context
-def run(ctx: click.Context, org: str | None, repo: tuple[str, ...], repo_path: str, since_prs: str | None, since_git: str, limit: int | None, fresh: bool, skip_fetch: bool, output: str | None, min_pr_rate: float) -> None:
+def run(ctx: click.Context, org: str | None, repo: tuple[str, ...], repo_path: str, since_prs: str | None, since_git: str, limit: int | None, fresh: bool, skip_fetch: bool, min_pr_rate: float, output: str | None) -> None:
     """Build the social graph and open the visualization."""
-    ctx.obj["config"].min_pr_rate = min_pr_rate
-    _run_build(ctx, org, repo, repo_path, since_prs, since_git, limit, skip_fetch, fresh)
+    _run_build(ctx, org, repo, repo_path, since_prs, since_git, limit, skip_fetch, fresh, min_pr_rate)
     console.print()
     _run_viz(ctx, output)
 
@@ -813,7 +811,7 @@ def _resolve_org_repo(repo_path: str, org: str | None, repo: tuple[str, ...]) ->
     return resolved_org, resolved_repos
 
 
-def _run_build(ctx: click.Context, org: str | None, repo: tuple[str, ...], repo_path: str, since_prs: str | None, since_git: str, limit: int | None, skip_fetch: bool = False, fresh: bool = False) -> None:
+def _run_build(ctx: click.Context, org: str | None, repo: tuple[str, ...], repo_path: str, since_prs: str | None, since_git: str, limit: int | None, skip_fetch: bool = False, fresh: bool = False, min_pr_rate: float = 7.0) -> None:
     if fresh and skip_fetch:
         console.print("[red]Error:[/red] --fresh and --skip-fetch are mutually exclusive.")
         raise SystemExit(1)
@@ -841,6 +839,7 @@ def _run_build(ctx: click.Context, org: str | None, repo: tuple[str, ...], repo_
         limit=limit,
         skip_fetch=skip_fetch,
         fresh=fresh,
+        min_pr_rate=min_pr_rate,
         log=console.print,
     )
 

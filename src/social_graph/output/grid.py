@@ -1024,6 +1024,8 @@ function clearGraphFocus() {
   focusNode = undefined;
   focusNeighbors = undefined;
   setSearchStatus('');
+  const input = document.getElementById('graph-person-search');
+  if (input) input.value = '';
   document.getElementById('sigma-node-info').style.display = 'none';
   renderer.refresh({ skipIndexation: true });
 }

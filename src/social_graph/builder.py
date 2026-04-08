@@ -29,6 +29,7 @@ def run_build(
     limit: int | None = None,
     skip_fetch: bool = False,
     fresh: bool = False,
+    min_pr_rate: float = 7.0,
     log: Callable[[str], None] = print,
 ) -> None:
     """Execute the full build pipeline and store all results in SQLite."""
@@ -82,7 +83,7 @@ def run_build(
         all_prs: list[PullRequest] = []
         for repo_name in repos:
             all_prs.extend(cache.get_prs(f"{org}/{repo_name}"))
-        edges = build_social_graph(all_prs, min_pr_rate=config.min_pr_rate)
+        edges = build_social_graph(all_prs, min_pr_rate=min_pr_rate)
         cache.save_social_edges(edges)
         log(f"  {len(edges)} edges.")
 
