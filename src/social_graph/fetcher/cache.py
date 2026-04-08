@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from social_graph.models import (
+    Commit,
     Interaction,
     InteractionType,
     PullRequest,
@@ -105,6 +106,17 @@ CREATE TABLE IF NOT EXISTS build_meta (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS commits (
+    sha TEXT PRIMARY KEY,
+    repo TEXT NOT NULL,
+    author_json TEXT NOT NULL,
+    committed_at TEXT NOT NULL,
+    files_json TEXT NOT NULL,
+    coauthors_json TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_commits_repo ON commits(repo);
 """
 
 
@@ -349,5 +361,52 @@ class PRCache:
         return {r[0]: r[1] for r in rows}
 
     def has_build_data(self) -> bool:
-        row = self._conn.execute("SELECT COUNT(*) FROM social_edges").fetchone()
+        row = self._conn.execute("SELECT COUNT(*) FROM build_meta").fetchone()
         return row[0] > 0
+
+    # --- Commit cache methods ---
+
+    def upsert_commit(self, commit: Commit) -> None:
+        self._conn.execute(
+            """INSERT OR REPLACE INTO commits
+               (sha, repo, author_json, committed_at, files_json, coauthors_json)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (
+                commit.sha,
+                commit.repo,
+                _user_to_json(commit.author),
+                _dt_to_str(commit.committed_at),
+                json.dumps(commit.files),
+                json.dumps([_user_to_json(u) for u in commit.coauthors]),
+            ),
+        )
+        self._conn.commit()
+
+    def delete_commits(self, repo: str) -> None:
+        """Remove all cached commits for a repo (before re-inserting fresh data)."""
+        self._conn.execute("DELETE FROM commits WHERE repo = ?", (repo,))
+        self._conn.commit()
+
+    def get_all_commits(self, repo: str | None = None) -> list[Commit]:
+        if repo:
+            rows = self._conn.execute(
+                "SELECT sha, repo, author_json, committed_at, files_json, coauthors_json FROM commits WHERE repo = ?",
+                (repo,),
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                "SELECT sha, repo, author_json, committed_at, files_json, coauthors_json FROM commits"
+            ).fetchall()
+        result = []
+        for r in rows:
+            coauthors_raw = json.loads(r[5])
+            coauthors = tuple(_user_from_json(c) for c in coauthors_raw)
+            result.append(Commit(
+                sha=r[0],
+                repo=r[1],
+                author=_user_from_json(r[2]),
+                committed_at=_str_to_dt(r[3]),
+                files=tuple(json.loads(r[4])),
+                coauthors=coauthors,
+            ))
+        return result
