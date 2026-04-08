@@ -12,6 +12,8 @@ INTERACTION_WEIGHTS: dict[InteractionType, float] = {
     InteractionType.REVIEW: 1.0,
     InteractionType.REVIEW_COMMENT: 0.7,
     InteractionType.ISSUE_COMMENT: 0.4,
+    InteractionType.CO_AUTHOR: 1.0,
+    InteractionType.FILE_PROXIMITY: 0.3,
 }
 
 # Edges below this threshold are discarded

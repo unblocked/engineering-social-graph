@@ -17,6 +17,13 @@ class InteractionType(Enum):
     REVIEW = "review"
     REVIEW_COMMENT = "review_comment"
     ISSUE_COMMENT = "issue_comment"
+    CO_AUTHOR = "co_author"
+    FILE_PROXIMITY = "file_proximity"
+
+
+class BuildMode(Enum):
+    PR = "pr"
+    COMMIT = "commit"
 
 
 @dataclass(frozen=True)
@@ -81,6 +88,16 @@ class SocialEdge:
     author: User
     reviewer: User
     weight: float
+
+
+@dataclass(frozen=True)
+class Commit:
+    sha: str
+    repo: str
+    author: User
+    committed_at: datetime
+    files: tuple[str, ...]
+    coauthors: tuple[User, ...]
 
 
 @dataclass(frozen=True)
