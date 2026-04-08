@@ -25,6 +25,18 @@ WEIGHT_PROXIMITY = 0.3
 WEIGHT_LOAD_BALANCE = 0.1
 
 
+def _login_from_email(email: str) -> str:
+    """Extract a likely login from an email address.
+
+    experts_for_path returns email addresses as the User.login field.
+    Strip the domain and any noreply prefix (e.g. '12345+user@users.noreply.github.com').
+    """
+    local = email.split("@")[0]
+    if "+" in local:
+        local = local.split("+", 1)[1]
+    return local
+
+
 def suggest_reviewers(
     repo_path: str | Path,
     changed_paths: list[str],
@@ -51,8 +63,9 @@ def suggest_reviewers(
     for path in changed_paths:
         rankings = experts_for_path(str(repo_path), path, top_n=20)
         for r in rankings:
-            expertise_scores[r.user.login] += r.score
-            expertise_counts[r.user.login] += 1
+            login = _login_from_email(r.user.login)
+            expertise_scores[login] += r.score
+            expertise_counts[login] += 1
 
     # Normalize expertise: average across paths, then normalize to [0, 1]
     avg_expertise: dict[str, float] = {}
@@ -60,6 +73,8 @@ def suggest_reviewers(
         avg_expertise[login] = total / expertise_counts[login]
 
     max_exp = max(avg_expertise.values()) if avg_expertise else 1.0
+    if max_exp == 0.0:
+        max_exp = 1.0
     norm_expertise = {k: v / max_exp for k, v in avg_expertise.items()}
 
     # 2. Compute social proximity to the author
