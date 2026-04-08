@@ -322,7 +322,9 @@ def _derive_team_labels(communities: list[set[str]], areas, names: dict[str, str
     if api_key:
         try:
             return _llm_team_labels(communities, team_area_data, names, api_key)
-        except Exception:
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).warning("LLM team labeling failed, using fallback: %s", exc)
             return _area_fallback_labels()
 
     return _area_fallback_labels()
