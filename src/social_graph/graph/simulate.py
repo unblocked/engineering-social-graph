@@ -228,6 +228,10 @@ def simulate_departure(
             knowledge_monopolies.append(area.path)
         elif bf_after < bf_before:
             status = "degraded"
+        elif bf_after > bf_before:
+            # Can happen: removing the top expert lowers the threshold,
+            # which may qualify more remaining experts.
+            status = "improved"
         else:
             status = "unchanged"
 
