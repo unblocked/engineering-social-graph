@@ -230,9 +230,14 @@ social-graph reset            Delete all cached data and start fresh
 --since-prs DATE       Fetch PRs updated since this date (e.g. '2025-01-01')
 --since-git TEXT        Git log lookback period (default: '6 months ago')
 --limit INT            Max PRs to fetch
+--min-pr-rate FLOAT    Minimum authored PRs/month to retain a contributor in the social graph
+--min-active-author-fraction FLOAT
+                       Minimum author-retention fraction auto-tuning will accept
 --skip-fetch           Rebuild graph from cached PRs only (no API calls)
 --fresh                Ignore cache timestamps, re-fetch everything
 ```
+
+If `--min-pr-rate` is omitted, the build starts with the default threshold and automatically steps it down when that filter would wipe out too much of the graph. If you pass `--min-pr-rate` explicitly, it is treated as strict: the build keeps that threshold, warns if retention is low, and fails only if it produces zero edges.
 
 ### Authentication
 

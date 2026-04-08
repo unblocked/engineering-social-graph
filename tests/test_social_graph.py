@@ -3,7 +3,12 @@
 import math
 from datetime import datetime, timedelta, timezone
 
-from social_graph.graph.social import build_social_graph
+from social_graph.graph.social import (
+    MIN_ACTIVE_AUTHOR_FRACTION,
+    build_social_graph,
+    build_social_graph_with_diagnostics,
+    resolve_social_graph_threshold,
+)
 from social_graph.models import (
     Interaction,
     InteractionType,
@@ -30,6 +35,64 @@ def _make_pr(
         updated_at=updated,
         interactions=interactions,
     )
+
+
+def _make_review_cycle_prs(author_count: int, days_ago: int = 5) -> list[PullRequest]:
+    """Create a ring of authors who each author one reviewed PR."""
+    users = [User(id=str(i), login=f"user{i}", name=f"User {i}") for i in range(author_count)]
+    now = datetime.now(timezone.utc)
+    prs: list[PullRequest] = []
+    for i, author in enumerate(users):
+        reviewer = users[(i + 1) % author_count]
+        prs.append(
+            PullRequest(
+                number=i + 1,
+                repo="test-org/test-repo",
+                author=author,
+                state=PullRequestState.MERGED,
+                created_at=now - timedelta(days=days_ago + 1),
+                updated_at=now - timedelta(days=days_ago),
+                merged_at=now - timedelta(days=days_ago),
+                interactions=[
+                    Interaction(user=reviewer, type=InteractionType.REVIEW, created_at=now - timedelta(days=days_ago)),
+                ],
+            )
+        )
+    return prs
+
+
+def _make_mixed_velocity_prs() -> list[PullRequest]:
+    """Create a graph where a stricter retention floor forces a lower threshold."""
+    now = datetime.now(timezone.utc)
+    fast_a = User(id="fast-a", login="fast-a", name="Fast A")
+    fast_b = User(id="fast-b", login="fast-b", name="Fast B")
+    slow_users = [
+        User(id=f"slow-{idx}", login=f"slow-{idx}", name=f"Slow {idx}")
+        for idx in range(4)
+    ]
+
+    def _pr(number: int, author: User, reviewer: User, created_days_ago: int) -> PullRequest:
+        return PullRequest(
+            number=number,
+            repo="test-org/test-repo",
+            author=author,
+            state=PullRequestState.MERGED,
+            created_at=now - timedelta(days=created_days_ago),
+            updated_at=now - timedelta(days=5),
+            merged_at=now - timedelta(days=5),
+            interactions=[
+                Interaction(user=reviewer, type=InteractionType.REVIEW, created_at=now - timedelta(days=5)),
+            ],
+        )
+
+    return [
+        _pr(1, fast_a, fast_b, created_days_ago=7),
+        _pr(2, fast_b, fast_a, created_days_ago=7),
+        _pr(3, slow_users[0], slow_users[1], created_days_ago=50),
+        _pr(4, slow_users[1], slow_users[0], created_days_ago=50),
+        _pr(5, slow_users[2], slow_users[3], created_days_ago=50),
+        _pr(6, slow_users[3], slow_users[2], created_days_ago=50),
+    ]
 
 
 def test_golden_test():
@@ -228,3 +291,79 @@ def test_multiple_authors():
     authors = {e.author.login for e in edges}
     assert "author1" in authors
     assert "author2" in authors
+
+
+def test_diagnostics_report_retained_author_fraction():
+    prs = _make_review_cycle_prs(author_count=6)
+
+    edges, diagnostics = build_social_graph_with_diagnostics(prs, min_pr_rate=1.0)
+
+    assert len(edges) == 6
+    assert diagnostics.total_authors == 6
+    assert diagnostics.active_authors == 6
+    assert diagnostics.retained_fraction == 1.0
+    assert diagnostics.edges == 6
+
+
+def test_diagnostics_ignore_open_pr_only_authors():
+    merged_prs = _make_review_cycle_prs(author_count=2)
+    open_only_author = User(id="open", login="open-only", name="Open Only")
+    reviewer = User(id="reviewer", login="reviewer", name="Reviewer")
+    now = datetime.now(timezone.utc)
+
+    merged_prs.append(
+        PullRequest(
+            number=99,
+            repo="test-org/test-repo",
+            author=open_only_author,
+            state=PullRequestState.OPEN,
+            created_at=now - timedelta(days=5),
+            updated_at=now - timedelta(days=5),
+            interactions=[
+                Interaction(user=reviewer, type=InteractionType.REVIEW, created_at=now - timedelta(days=5)),
+            ],
+        )
+    )
+
+    _, diagnostics = build_social_graph_with_diagnostics(merged_prs, min_pr_rate=0)
+
+    assert diagnostics.total_authors == 2
+    assert diagnostics.active_authors == 2
+
+
+def test_default_threshold_auto_tunes_down_when_filter_is_too_aggressive():
+    prs = _make_review_cycle_prs(author_count=6)
+
+    edges, diagnostics, attempts = resolve_social_graph_threshold(prs)
+
+    assert attempts[0].min_pr_rate == 7.0
+    assert attempts[0].edges == 0
+    assert diagnostics.min_pr_rate == 1.0
+    assert diagnostics.retained_fraction >= MIN_ACTIVE_AUTHOR_FRACTION
+    assert len(edges) == 6
+
+
+def test_retention_floor_can_force_a_lower_auto_tuned_threshold():
+    prs = _make_mixed_velocity_prs()
+
+    edges, diagnostics, attempts = resolve_social_graph_threshold(
+        prs,
+        min_active_author_fraction=0.5,
+    )
+
+    assert attempts[0].min_pr_rate == 7.0
+    assert diagnostics.min_pr_rate == 0.5
+    assert diagnostics.retained_fraction == 1.0
+    assert len(edges) == 6
+
+
+def test_explicit_threshold_is_strict_even_if_it_eliminates_everyone():
+    prs = _make_review_cycle_prs(author_count=6)
+
+    edges, diagnostics, attempts = resolve_social_graph_threshold(prs, min_pr_rate=7.0)
+
+    assert len(attempts) == 1
+    assert attempts[0].min_pr_rate == 7.0
+    assert diagnostics.min_pr_rate == 7.0
+    assert diagnostics.edges == 0
+    assert edges == []
