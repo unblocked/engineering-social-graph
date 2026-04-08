@@ -28,6 +28,14 @@ WEIGHT_PROXIMITY = 0.3
 WEIGHT_LOAD_BALANCE = 0.1
 
 
+def _login_from_email(email: str) -> str:
+    """Normalize an email to a login prefix, matching GitHub noreply format."""
+    login = email.split("@")[0]
+    if "+" in login:
+        login = login.split("+", 1)[1]
+    return login
+
+
 def suggest_reviewers(
     repo_path: str | Path,
     changed_paths: list[str],
@@ -44,10 +52,15 @@ def suggest_reviewers(
         edges: Social graph edges (from cache).
         author_login: The PR author's login (excluded from suggestions).
         top_n: Number of reviewers to return.
+        mode: ``"prs"`` (default) uses PR edges for proximity;
+              ``"commits"`` derives proximity from git log co-commits.
 
     Returns:
         List of dicts with keys: login, score, expertise, proximity, reason.
     """
+    if mode not in ("prs", "commits"):
+        raise ValueError(f"mode must be 'prs' or 'commits', got {mode!r}")
+
     # 1. Aggregate expertise across all changed paths
     expertise_scores: dict[str, float] = defaultdict(float)
     expertise_counts: dict[str, int] = defaultdict(int)
@@ -55,8 +68,10 @@ def suggest_reviewers(
     for path in changed_paths:
         rankings = experts_for_path(str(repo_path), path, top_n=20)
         for r in rankings:
-            expertise_scores[r.user.login] += r.score
-            expertise_counts[r.user.login] += 1
+            # experts_for_path returns emails as login; normalize to prefix
+            login = _login_from_email(r.user.login)
+            expertise_scores[login] += r.score
+            expertise_counts[login] += 1
 
     # Normalize expertise: average across paths, then normalize to [0, 1]
     avg_expertise: dict[str, float] = {}
@@ -155,18 +170,21 @@ def co_commit_proximity(
     since = f"{THREE_SIGMA_DAYS} days ago"
 
     for path in changed_paths:
-        result = subprocess.run(
-            [
-                "git", "log",
-                "--format=%aE\t%aI",
-                f"--since={since}",
-                "--", path,
-            ],
-            cwd=str(repo_path),
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
+        try:
+            result = subprocess.run(
+                [
+                    "git", "log",
+                    "--format=%aE\t%aI",
+                    f"--since={since}",
+                    "--", path,
+                ],
+                cwd=str(repo_path),
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+        except subprocess.TimeoutExpired:
+            continue
         if result.returncode != 0 or not result.stdout.strip():
             continue
 
@@ -176,10 +194,7 @@ def co_commit_proximity(
                 continue
             email, iso_date = parts
 
-            # Normalize login from email (same pattern as code_expertise.py)
-            login = email.split("@")[0]
-            if "+" in login:
-                login = login.split("+", 1)[1]
+            login = _login_from_email(email)
 
             try:
                 dt = datetime.fromisoformat(iso_date)
