@@ -224,6 +224,11 @@ def _build_teams(edges: list[SocialEdge], user_data: dict, names: dict[str, str]
                 if w_out > 0 or w_in > 0:
                     collabs.append(f'{_esc(names.get(other, other))} ({max(w_out, w_in):.2f})')
 
+            collab_display = ", ".join(collabs[:3])
+            if len(collabs) > 3:
+                collab_display += f" +{len(collabs) - 3} more"
+            collab_text = collab_display if collabs else "\u2014"
+
             meta_html = f'<div class="tm-meta">{meta}</div>' if meta else ''
             member_rows.append(
                 f'<div class="team-member">'
@@ -238,13 +243,13 @@ def _build_teams(edges: list[SocialEdge], user_data: dict, names: dict[str, str]
                 f'<span>Reviews {reviewed} edges</span>'
                 f'{"<span>" + loc_str + "</span>" if loc_str else ""}'
                 f'</div>'
-                f'<div class="tm-collabs">Collaborates with: {", ".join(collabs[:5]) if collabs else "—"}</div>'
+                f'<div class="tm-collabs">Collaborates with: {collab_text}</div>'
                 f'</div>'
             )
 
         label = team_labels.get(i, f"Team {i + 1}")
         cards.append(
-            f'<div class="team-card">'
+            f'<div class="team-card stagger-item">'
             f'<div class="team-header" style="border-left: 4px solid {color};">'
             f'<h3>{_esc(label)}</h3>'
             f'<span class="team-count">{len(members)} members</span>'
@@ -398,12 +403,12 @@ def _build_experts(areas) -> str:
         expert_rows: list[str] = []
         for i, expert in enumerate(area.experts[:5]):
             score_pct = int(expert.score * 100)
-            bar_color = "#50c878" if expert.score > 0.7 else "#4e9ee8" if expert.score > 0.3 else "#8b949e"
+            bar_color = "#2dd4bf" if expert.score > 0.7 else "#60a5fa" if expert.score > 0.3 else "#71717a"
             expert_rows.append(
                 f'<div class="expert-row">'
                 f'<span class="expert-name">{_esc(expert.login)}</span>'
                 f'<span class="expert-stats">'
-                f'<span class="expert-score-bar"><span style="width:{score_pct}%;background:{bar_color}"></span></span>'
+                f'<span class="expert-score-bar"><span class="bar-animate" style="width:{score_pct}%;background:{bar_color}"></span></span>'
                 f'<span class="expert-score-val">{expert.score:.2f}</span>'
                 f'</span>'
                 f'<span class="expert-detail">{expert.commits} commits · {expert.lines:,} lines · {expert.files_touched} files · {expert.last_commit_days_ago}d ago</span>'
@@ -411,7 +416,7 @@ def _build_experts(areas) -> str:
             )
 
         cards.append(
-            f'<div class="area-card">'
+            f'<div class="area-card stagger-item">'
             f'<div class="area-header">'
             f'<div>'
             f'<div class="area-name">{_esc(area.name)}</div>'
@@ -447,99 +452,152 @@ _PAGE_TEMPLATE = """\
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Social Comment Network</title>
+<title>Social Graph</title>
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/geist@1.3.1/dist/fonts/geist-sans/style.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/geist@1.3.1/dist/fonts/geist-mono/style.min.css">
 <style>
-  * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-  body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0d1117; color: #c9d1d9; padding: 24px; }}
-  h1 {{ font-size: 24px; color: #f0f6fc; margin-bottom: 8px; }}
-  h2 {{ font-size: 18px; color: #f0f6fc; margin: 32px 0 12px; }}
-  h3 {{ font-size: 15px; color: #c9d1d9; margin: 24px 0 8px; }}
-  .subtitle {{ font-size: 14px; color: #8b949e; margin-bottom: 24px; }}
+  :root {{
+    --bg-base: #09090b;
+    --bg-surface: rgba(24,24,27,0.6);
+    --bg-solid: #18181b;
+    --bg-elevated: #27272a;
+    --border: rgba(255,255,255,0.06);
+    --border-active: rgba(255,255,255,0.12);
+    --text-primary: #fafafa;
+    --text-secondary: #a1a1aa;
+    --text-muted: #71717a;
+    --accent: #2dd4bf;
+    --accent-dim: rgba(45,212,191,0.15);
+  }}
 
-  .avatar {{ border-radius: 50%; vertical-align: middle; margin-right: 4px; }}
+  * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+  body {{ font-family: 'Geist', sans-serif; background: var(--bg-base); color: var(--text-secondary); padding: 24px; }}
+  h1 {{ font-size: 20px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px; }}
+  h2 {{ font-size: 18px; font-weight: 600; color: var(--text-primary); margin: 32px 0 12px; }}
+  h3 {{ font-size: 15px; font-weight: 500; color: var(--text-secondary); margin: 24px 0 8px; }}
+  .subtitle {{ font-size: 13px; color: var(--text-muted); margin-bottom: 24px; }}
+  .subtitle a {{ color: var(--text-muted); }}
+
+  .avatar {{ border-radius: 50%; vertical-align: middle; margin-right: 4px; border: 1px solid var(--border); }}
+
+  /* Animations */
+  @keyframes fadeInUp {{
+    from {{ opacity: 0; transform: translateY(4px); }}
+    to {{ opacity: 1; transform: translateY(0); }}
+  }}
+
+  /* Stagger utility */
+  .stagger-item {{ animation: fadeInUp 0.3s ease-out both; }}
+  .stagger-item:nth-child(1) {{ animation-delay: 0ms; }}
+  .stagger-item:nth-child(2) {{ animation-delay: 30ms; }}
+  .stagger-item:nth-child(3) {{ animation-delay: 60ms; }}
+  .stagger-item:nth-child(4) {{ animation-delay: 90ms; }}
+  .stagger-item:nth-child(5) {{ animation-delay: 120ms; }}
+  .stagger-item:nth-child(6) {{ animation-delay: 150ms; }}
+  .stagger-item:nth-child(7) {{ animation-delay: 180ms; }}
+  .stagger-item:nth-child(8) {{ animation-delay: 210ms; }}
+  .stagger-item:nth-child(9) {{ animation-delay: 240ms; }}
+  .stagger-item:nth-child(10) {{ animation-delay: 270ms; }}
+  .stagger-item:nth-child(n+11) {{ animation-delay: 300ms; }}
 
   /* Grid */
-  .grid-table {{ border-collapse: collapse; font-size: 12px; margin: 16px 0; }}
-  .grid-table td {{ padding: 6px 8px; border: 1px solid #30363d; text-align: center; min-width: 60px; }}
-  .grid-table .corner {{ background: #161b22; text-align: left; font-weight: 600; font-size: 11px; color: #8b949e; white-space: nowrap; }}
-  .grid-table .header-cell {{ background: #161b22; font-weight: 600; color: #c9d1d9; writing-mode: horizontal-tb; max-width: 80px; overflow: hidden; text-overflow: ellipsis; }}
-  .grid-table .row-label {{ background: #161b22; font-weight: 600; text-align: left; color: #c9d1d9; white-space: nowrap; }}
-  .grid-table .cell {{ color: #fff; font-weight: 500; font-variant-numeric: tabular-nums; }}
-  .grid-table .cell.empty {{ background: #0d1117; }}
+  .grid-table {{ border-collapse: separate; border-spacing: 2px; font-size: 12px; margin: 16px 0; }}
+  .grid-table td {{ padding: 6px 8px; border: none; text-align: center; min-width: 60px; border-radius: 4px; }}
+  .grid-table .corner {{ background: transparent; text-align: left; font-weight: 600; font-size: 11px; color: var(--text-muted); font-family: 'Geist Mono', monospace; white-space: nowrap; }}
+  .grid-table .header-cell {{ background: var(--bg-solid); font-weight: 500; color: var(--text-secondary); font-family: 'Geist Mono', monospace; font-size: 11px; max-width: 80px; overflow: hidden; text-overflow: ellipsis; }}
+  .grid-table .row-label {{ background: var(--bg-solid); font-weight: 500; text-align: left; color: var(--text-secondary); font-family: 'Geist Mono', monospace; font-size: 11px; white-space: nowrap; }}
+  .grid-table .cell {{ color: #fff; font-weight: 500; font-variant-numeric: tabular-nums; font-family: 'Geist Mono', monospace; transition: box-shadow 0.15s; }}
+  .grid-table .cell:hover {{ box-shadow: 0 0 8px rgba(45,212,191,0.4); }}
+  .grid-table .cell.empty {{ background: var(--bg-base); }}
   .grid-wrapper {{ overflow-x: auto; }}
 
   /* Peer tables */
   .peer-section {{ margin: 16px 0; }}
+  .peer-header {{ font-size: 13px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); }}
   .peer-table {{ border-collapse: collapse; width: 100%; max-width: 600px; margin: 8px 0; }}
-  .peer-table th {{ text-align: left; padding: 8px 12px; background: #161b22; color: #8b949e; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px; border-bottom: 1px solid #30363d; }}
-  .peer-table td {{ padding: 8px 12px; border-bottom: 1px solid #21262d; }}
-  .peer-name {{ color: #c9d1d9; }}
+  .peer-table th {{ text-align: left; padding: 8px 12px; background: var(--bg-solid); color: var(--text-muted); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid var(--border); }}
+  .peer-table td {{ padding: 8px 12px; border-bottom: 1px solid var(--border); }}
+  .peer-name {{ color: var(--text-secondary); }}
   .peer-weight {{ display: flex; align-items: center; gap: 10px; }}
-  .weight-num {{ font-variant-numeric: tabular-nums; font-size: 13px; min-width: 45px; }}
-  .bar-bg {{ flex: 1; max-width: 120px; height: 6px; background: #30363d; border-radius: 3px; }}
-  .bar-fill {{ height: 100%; border-radius: 3px; transition: width 0.2s; }}
-  .peer-table tbody tr:hover {{ background: #161b22; }}
+  .weight-num {{ font-family: 'Geist Mono', monospace; font-variant-numeric: tabular-nums; font-size: 13px; min-width: 45px; }}
+  .bar-bg {{ flex: 1; max-width: 120px; height: 6px; background: var(--bg-elevated); border-radius: 3px; }}
+  .bar-fill {{ height: 100%; border-radius: 3px; transition: width 0.4s ease-out; }}
+  .peer-table tbody tr:hover {{ background: var(--bg-elevated); }}
 
   /* Tabs */
-  .tabs {{ display: flex; gap: 0; margin: 24px 0 0; border-bottom: 1px solid #30363d; }}
-  .tab {{ padding: 10px 20px; cursor: pointer; color: #8b949e; font-size: 14px; border-bottom: 2px solid transparent; transition: all 0.15s; }}
-  .tab:hover {{ color: #c9d1d9; }}
-  .tab.active {{ color: #f0f6fc; border-bottom-color: #4e9ee8; }}
+  .tabs {{ display: flex; gap: 0; margin: 24px 0 0; border-bottom: 1px solid var(--border); position: relative; }}
+  .tab {{ padding: 10px 20px; cursor: pointer; color: var(--text-muted); font-size: 14px; border-bottom: 2px solid transparent; transition: color 0.15s; }}
+  .tab:hover {{ color: var(--text-secondary); }}
+  .tab.active {{ color: var(--text-primary); border-bottom-color: transparent; }}
+  .tab-indicator {{
+    position: absolute;
+    bottom: -1px;
+    height: 2px;
+    background: var(--accent);
+    border-radius: 1px;
+    transition: left 0.3s cubic-bezier(0.4, 0, 0.2, 1), width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  }}
   .tab-content {{ display: none; padding: 16px 0; }}
-  .tab-content.active {{ display: block; }}
+  .tab-content.active {{ display: block; animation: fadeInUp 0.2s ease-out; }}
+
   /* Teams */
   .teams-grid {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(400px, 1fr)); gap: 20px; }}
-  .team-card {{ background: #161b22; border: 1px solid #30363d; border-radius: 8px; overflow: hidden; }}
-  .team-header {{ padding: 14px 18px; background: #0d1117; display: flex; justify-content: space-between; align-items: center; }}
-  .team-header h3 {{ font-size: 15px; color: #f0f6fc; margin: 0; }}
-  .team-count {{ font-size: 12px; color: #8b949e; background: #30363d; padding: 2px 10px; border-radius: 10px; }}
-  .team-member {{ padding: 12px 18px; border-top: 1px solid #21262d; }}
-  .team-member:hover {{ background: #1c2129; }}
+  .team-card {{ background: var(--bg-surface); backdrop-filter: blur(12px); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; transition: border-color 0.15s, transform 0.15s; }}
+  .team-card:hover {{ border-color: var(--border-active); transform: translateY(-1px); }}
+  .team-header {{ padding: 14px 20px; background: rgba(9,9,11,0.5); display: flex; justify-content: space-between; align-items: center; }}
+  .team-header h3 {{ font-size: 15px; color: var(--text-primary); margin: 0; }}
+  .team-count {{ font-size: 12px; background: var(--accent-dim); color: var(--accent); font-family: 'Geist Mono', monospace; padding: 2px 10px; border-radius: 10px; }}
+  .team-member {{ padding: 14px 20px; border-top: 1px solid var(--border); }}
+  .team-member:hover {{ background: var(--bg-elevated); }}
   .tm-header {{ display: flex; align-items: center; gap: 10px; }}
   .tm-info {{ flex: 1; }}
-  .tm-name {{ font-weight: 600; color: #f0f6fc; font-size: 14px; }}
-  .tm-login {{ font-size: 12px; color: #8b949e; }}
-  .tm-login a {{ color: #4e9ee8; text-decoration: none; }}
+  .tm-name {{ font-weight: 600; color: var(--text-primary); font-size: 14px; }}
+  .tm-login {{ font-size: 12px; color: var(--text-muted); }}
+  .tm-login a {{ color: var(--accent); text-decoration: none; }}
   .tm-login a:hover {{ text-decoration: underline; }}
-  .tm-meta {{ font-size: 11px; color: #6e7681; margin-top: 4px; }}
-  .tm-stats {{ display: flex; gap: 16px; font-size: 11px; color: #8b949e; margin-top: 6px; }}
-  .tm-collabs {{ font-size: 11px; color: #6e7681; margin-top: 4px; }}
+  .tm-meta {{ font-size: 11px; color: var(--text-muted); margin-top: 4px; }}
+  .tm-stats {{ display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }}
+  .tm-stats span {{ background: var(--accent-dim); color: var(--accent); padding: 2px 8px; border-radius: 6px; font-size: 11px; font-family: 'Geist Mono', monospace; }}
+  .tm-collabs {{ font-size: 11px; color: var(--text-muted); margin-top: 4px; }}
 
   /* Experts */
   .areas-grid {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(480px, 1fr)); gap: 16px; }}
-  .area-card {{ background: #161b22; border: 1px solid #30363d; border-radius: 8px; overflow: hidden; }}
-  .area-header {{ padding: 14px 18px; background: #0d1117; display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }}
-  .area-name {{ font-size: 15px; font-weight: 600; color: #f0f6fc; }}
-  .area-path {{ font-size: 11px; color: #6e7681; font-family: monospace; margin-top: 2px; }}
+  .area-card {{ background: var(--bg-surface); backdrop-filter: blur(12px); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; transition: border-color 0.15s, transform 0.15s; }}
+  .area-card:hover {{ border-color: var(--border-active); transform: translateY(-1px); }}
+  .area-header {{ padding: 14px 18px; background: rgba(9,9,11,0.5); display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }}
+  .area-name {{ font-size: 15px; font-weight: 600; color: var(--text-primary); }}
+  .area-path {{ font-size: 11px; color: var(--text-muted); font-family: 'Geist Mono', monospace; margin-top: 2px; }}
   .area-meta {{ text-align: right; flex-shrink: 0; }}
   .bus-factor {{ display: inline-block; font-size: 11px; font-weight: 600; padding: 2px 8px; border: 1.5px solid; border-radius: 10px; }}
-  .area-stat {{ display: block; font-size: 11px; color: #6e7681; margin-top: 4px; }}
-  .expert-row {{ padding: 8px 18px; border-top: 1px solid #21262d; display: grid; grid-template-columns: 140px 1fr; grid-template-rows: auto auto; column-gap: 12px; row-gap: 2px; align-items: center; }}
-  .expert-row:hover {{ background: #1c2129; }}
-  .expert-name {{ font-size: 13px; color: #c9d1d9; font-weight: 500; grid-row: 1; }}
+  .area-stat {{ display: block; font-size: 11px; color: var(--text-muted); margin-top: 4px; }}
+  .expert-row {{ padding: 8px 18px; border-top: 1px solid var(--border); display: grid; grid-template-columns: 140px 1fr; grid-template-rows: auto auto; column-gap: 12px; row-gap: 2px; align-items: center; }}
+  .expert-row:hover {{ background: var(--bg-elevated); }}
+  .expert-name {{ font-size: 13px; font-family: 'Geist Mono', monospace; color: var(--text-secondary); font-weight: 500; grid-row: 1; }}
   .expert-stats {{ display: flex; align-items: center; gap: 8px; grid-row: 1; }}
-  .expert-score-bar {{ width: 80px; height: 6px; background: #30363d; border-radius: 3px; display: inline-block; }}
+  .expert-score-bar {{ width: 80px; height: 6px; background: var(--bg-elevated); border-radius: 3px; display: inline-block; }}
   .expert-score-bar span {{ display: block; height: 100%; border-radius: 3px; }}
-  .expert-score-val {{ font-size: 12px; color: #8b949e; font-variant-numeric: tabular-nums; min-width: 32px; }}
-  .expert-detail {{ grid-column: 1 / -1; font-size: 11px; color: #6e7681; }}
+  .expert-score-val {{ font-size: 12px; color: var(--text-muted); font-variant-numeric: tabular-nums; min-width: 32px; }}
+  .expert-detail {{ grid-column: 1 / -1; font-size: 11px; font-family: 'Geist Mono', monospace; color: var(--text-muted); }}
 
   #tab-graph.active {{ padding: 0; margin: 0 -24px -24px; }}
 </style>
 </head>
 <body>
-  <h1>Social Comment Network</h1>
-  <p class="subtitle">Determines how interested team members are in each other's discussions, based on historical activity in their pull request comments.</p>
+  <h1>Social Graph</h1>
+  <p class="subtitle">Developer collaboration patterns derived from pull request review history.</p>
 
   <div class="tabs">
-    <div class="tab" data-tab="grid">Heat Map Grid</div>
+    <div class="tab" data-tab="grid">Heat Map</div>
     <div class="tab" data-tab="peers">Peer Tables</div>
     <div class="tab" data-tab="teams">Teams</div>
     <div class="tab" data-tab="experts">Experts</div>
-    <div class="tab active" data-tab="graph">Interactive Graph</div>
+    <div class="tab active" data-tab="graph">Graph</div>
+    <div class="tab-indicator"></div>
   </div>
 
   <div class="tab-content" id="tab-grid">
-    <h2>Social Comment Network Grid</h2>
+    <h2>Collaboration Heat Map</h2>
     <div class="grid-wrapper">
       {grid}
     </div>
@@ -551,7 +609,7 @@ _PAGE_TEMPLATE = """\
   </div>
 
   <div class="tab-content" id="tab-teams">
-    <h2>Teams (by collaboration clusters)</h2>
+    <h2>Teams</h2>
     <p class="subtitle" style="margin-bottom:16px;">Auto-detected teams based on PR review collaboration patterns. People who frequently review each other's code are grouped together.</p>
     <div class="teams-grid">
       {teams}
@@ -560,7 +618,7 @@ _PAGE_TEMPLATE = """\
 
   <div class="tab-content" id="tab-experts">
     <h2>Code Area Experts</h2>
-    <p class="subtitle" style="margin-bottom:16px;">Auto-detected from git history. Expertise score = recency (35%) + time-decayed lines (30%) + file breadth (20%) + commits (15%), per <a href="https://arxiv.org/abs/2208.07501" style="color:#8b949e;">Cury et al. 2022</a>. Bus factor via coverage-based iterative removal (<a href="https://arxiv.org/abs/1604.06766" style="color:#8b949e;">Avelino et al. 2016</a>).</p>
+    <p class="subtitle" style="margin-bottom:16px;">Auto-detected from git history. Expertise score = recency (35%) + time-decayed lines (30%) + file breadth (20%) + commits (15%), per <a href="https://arxiv.org/abs/2208.07501">Cury et al. 2022</a>. Bus factor via coverage-based iterative removal (<a href="https://arxiv.org/abs/1604.06766">Avelino et al. 2016</a>).</p>
     <div class="areas-grid">
       {experts}
     </div>
@@ -571,17 +629,39 @@ _PAGE_TEMPLATE = """\
   </div>
 
   <script>
-    document.querySelectorAll('.tab').forEach(tab => {{
+    const tabs = document.querySelectorAll('.tab');
+    const indicator = document.querySelector('.tab-indicator');
+
+    function updateIndicator(tab) {{
+      indicator.style.left = tab.offsetLeft + 'px';
+      indicator.style.width = tab.offsetWidth + 'px';
+    }}
+
+    const activeTab = document.querySelector('.tab.active');
+    if (activeTab) updateIndicator(activeTab);
+
+    tabs.forEach(tab => {{
       tab.addEventListener('click', () => {{
-        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        tabs.forEach(t => t.classList.remove('active'));
         document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
         tab.classList.add('active');
-        document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
-        // Signal sigma to init when its tab becomes visible
+        updateIndicator(tab);
+        const content = document.getElementById('tab-' + tab.dataset.tab);
+        content.classList.add('active');
+        content.querySelectorAll('.bar-animate').forEach(bar => {{
+          bar.style.animation = 'none';
+          bar.offsetHeight;
+          bar.style.animation = '';
+        }});
         if (tab.dataset.tab === 'graph') {{
           window.dispatchEvent(new Event('init-sigma'));
         }}
       }});
+    }});
+
+    window.addEventListener('resize', () => {{
+      const current = document.querySelector('.tab.active');
+      if (current) updateIndicator(current);
     }});
   </script>
 </body>
@@ -591,23 +671,23 @@ _PAGE_TEMPLATE = """\
 
 _SIGMA_EMBED = """\
 <div style="display:flex;height:calc(100vh - 90px);min-height:500px;">
-  <div id="sigma-container" style="flex:1;height:100%;background:#1a1a2e;"></div>
-  <div id="sigma-sidebar" style="width:320px;height:100%;padding:16px;overflow-y:auto;font-size:13px;border-left:1px solid #30363d;background:#161b22;">
-    <p style="color:#8b949e;font-size:12px;">Hover to highlight connections. Click a node for details.</p>
+  <div id="sigma-container" style="flex:1;height:100%;background:#0a0a0f;"></div>
+  <div id="sigma-sidebar" style="width:320px;height:100%;padding:16px;overflow-y:auto;font-size:13px;background:rgba(24,24,27,0.6);backdrop-filter:blur(16px);border-left:1px solid rgba(255,255,255,0.06);font-family:'Geist',sans-serif;">
+    <p style="color:#71717a;font-size:12px;">Hover to highlight connections. Click a node for details.</p>
     <div id="sigma-node-info" style="display:none;">
-      <hr style="border:none;border-top:1px solid #30363d;margin:12px 0;">
+      <hr style="border:none;border-top:1px solid rgba(255,255,255,0.06);margin:12px 0;">
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
-        <img id="sigma-avatar" style="width:40px;height:40px;border-radius:50%;border:2px solid #30363d;" src="" alt="">
+        <img id="sigma-avatar" style="width:40px;height:40px;border-radius:50%;border:2px solid rgba(255,255,255,0.06);" src="" alt="">
         <div>
-          <div id="sigma-name" style="font-weight:600;color:#f0f6fc;"></div>
-          <div id="sigma-login" style="font-size:12px;color:#8b949e;"></div>
+          <div id="sigma-name" style="font-weight:600;color:#fafafa;"></div>
+          <div id="sigma-login" style="font-size:12px;color:#a1a1aa;"></div>
         </div>
       </div>
-      <div id="sigma-meta" style="font-size:11px;color:#6e7681;margin-bottom:8px;"></div>
-      <div id="sigma-stat" style="font-size:12px;color:#8b949e;margin-bottom:12px;"></div>
-      <h4 style="font-size:12px;color:#8b949e;text-transform:uppercase;letter-spacing:0.5px;margin:12px 0 6px;" id="sigma-given-label">Reviews PRs from</h4>
+      <div id="sigma-meta" style="font-size:11px;color:#71717a;margin-bottom:8px;"></div>
+      <div id="sigma-stat" style="font-size:12px;color:#a1a1aa;margin-bottom:12px;"></div>
+      <h4 style="font-size:12px;color:#71717a;font-family:'Geist',sans-serif;text-transform:uppercase;letter-spacing:0.5px;margin:12px 0 6px;" id="sigma-given-label">Reviews PRs from</h4>
       <ul id="sigma-given" style="list-style:none;padding:0;margin:0;"></ul>
-      <h4 style="font-size:12px;color:#8b949e;text-transform:uppercase;letter-spacing:0.5px;margin:12px 0 6px;" id="sigma-received-label">PRs reviewed by</h4>
+      <h4 style="font-size:12px;color:#71717a;font-family:'Geist',sans-serif;text-transform:uppercase;letter-spacing:0.5px;margin:12px 0 6px;" id="sigma-received-label">PRs reviewed by</h4>
       <ul id="sigma-received" style="list-style:none;padding:0;margin:0;"></ul>
     </div>
   </div>
@@ -766,7 +846,7 @@ let hoveredNode, hoveredNeighbors;
 const renderer = new SigmaClass(graph, container, {
   zoomingRatio: 1.02,
   renderEdgeLabels: false, enableEdgeEvents: false, defaultEdgeColor: '#555',
-  labelRenderedSizeThreshold: 6, labelColor: { color: '#c9d1d9' },
+  labelRenderedSizeThreshold: 6, labelColor: { color: '#a1a1aa' },
   nodeReducer: (node, data) => {
     const res = { ...data };
     if (hoveredNode) {
@@ -782,9 +862,9 @@ const renderer = new SigmaClass(graph, container, {
   },
   defaultDrawNodeHover: (ctx, data) => {
     if (!data.label) return;
-    ctx.font = 'bold 14px sans-serif';
+    ctx.font = '600 13px Geist, sans-serif';
     const tw = ctx.measureText(data.label).width, p = 8, bw = tw + p*2, bh = 14 + p*2;
-    ctx.fillStyle = 'rgba(0,0,0,0.85)'; ctx.beginPath(); ctx.roundRect(data.x - bw/2, data.y - data.size - bh - 4, bw, bh, 4); ctx.fill();
+    ctx.fillStyle = 'rgba(9,9,11,0.9)'; ctx.beginPath(); ctx.roundRect(data.x - bw/2, data.y - data.size - bh - 4, bw, bh, 6); ctx.fill();
     ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(data.label, data.x, data.y - data.size - bh/2 - 4);
   },
 });
@@ -826,18 +906,18 @@ function drawOverlay() {
     });
     const r = maxR + 50;
     // Filled circle
-    ctx.fillStyle = data.color + '12';
+    ctx.fillStyle = data.color + '08';
     ctx.beginPath();
     ctx.arc(cx, cy, r, 0, Math.PI * 2);
     ctx.fill();
     // Border
-    ctx.strokeStyle = data.color + '40';
+    ctx.strokeStyle = data.color + '20';
     ctx.lineWidth = 1.5;
     ctx.stroke();
     // Team label at top of circle
     const label = teamLabels[c] || '';
     if (label) {
-      ctx.font = 'bold 11px sans-serif';
+      ctx.font = '600 11px Geist, sans-serif';
       ctx.fillStyle = data.color + 'BB';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'bottom';
@@ -863,15 +943,15 @@ setTimeout(() => renderer.refresh(), 100);
 renderer.on('enterNode', ({ node }) => { hoveredNode = node; hoveredNeighbors = new Set(graph.neighbors(node)); renderer.refresh({ skipIndexation: true }); });
 renderer.on('leaveNode', () => { hoveredNode = undefined; hoveredNeighbors = undefined; renderer.refresh({ skipIndexation: true }); });
 
-function barColor(w) { return w > 0.7 ? '#50c878' : w > 0.3 ? '#4e9ee8' : '#8b949e'; }
+function barColor(w) { return w > 0.7 ? '#2dd4bf' : w > 0.3 ? '#60a5fa' : '#71717a'; }
 function fillList(id, data) {
   const el = document.getElementById(id); el.innerHTML = '';
   Object.entries(data).forEach(([name, w]) => {
     const li = document.createElement('li');
     li.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:3px 0;';
     li.innerHTML = '<span>' + name + '</span><span style="display:flex;align-items:center;gap:6px;">' +
-      '<span style="width:50px;height:6px;background:#30363d;border-radius:3px;display:inline-block;"><span style="display:block;width:' + Math.round(w*100) + '%;height:100%;background:' + barColor(w) + ';border-radius:3px;"></span></span>' +
-      '<span style="color:#8b949e;font-size:12px;min-width:40px;text-align:right;">' + w.toFixed(3) + '</span></span>';
+      '<span style="width:50px;height:6px;background:#27272a;border-radius:3px;display:inline-block;"><span style="display:block;width:' + Math.round(w*100) + '%;height:100%;background:' + barColor(w) + ';border-radius:3px;"></span></span>' +
+      '<span style="color:#a1a1aa;font-family:Geist Mono,monospace;font-size:12px;min-width:40px;text-align:right;">' + w.toFixed(3) + '</span></span>';
     el.appendChild(li);
   });
   if (!Object.keys(data).length) el.innerHTML = '<li style="color:#555;font-size:12px;">None</li>';
@@ -883,7 +963,7 @@ renderer.on('clickNode', ({ node }) => {
   if (nd.avatarUrl) { av.src = nd.avatarUrl; av.style.display = 'block'; } else av.style.display = 'none';
   document.getElementById('sigma-name').textContent = nd.label;
   const loginEl = document.getElementById('sigma-login');
-  loginEl.innerHTML = nd.htmlUrl ? '<a href="' + nd.htmlUrl + '" target="_blank" style="color:#4e9ee8;">@' + nd.login + '</a>' : '@' + nd.login;
+  loginEl.innerHTML = nd.htmlUrl ? '<a href="' + nd.htmlUrl + '" target="_blank" style="color:#2dd4bf;">@' + nd.login + '</a>' : '@' + nd.login;
   const meta = [];
   if (nd.company) meta.push('\\ud83c\\udfe2 ' + nd.company);
   if (nd.location) meta.push('\\ud83d\\udccd ' + nd.location);
