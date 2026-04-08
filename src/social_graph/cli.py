@@ -86,8 +86,13 @@ def status(ctx: click.Context) -> None:
     config: Config = ctx.obj["config"]
 
     console.print("[bold]Credentials[/bold]")
-    console.print(f"  GitHub token:    {'[green]configured[/green]' if config.github_token else '[red]not set[/red]'}")
-    console.print(f"  Anthropic key:   {'[green]configured[/green]' if config.anthropic_api_key else '[dim]not set (optional)[/dim]'}")
+    console.print(
+        f"  GitHub token:    {'[green]configured[/green]' if config.github_token else '[red]not set[/red]'}"
+    )
+    console.print(
+        "  Anthropic key:   "
+        f"{'[green]configured[/green]' if config.anthropic_api_key else '[dim]not set (optional)[/dim]'}"
+    )
     console.print()
 
     from social_graph.fetcher.cache import PRCache
@@ -109,6 +114,20 @@ def status(ctx: click.Context) -> None:
         console.print(f"  Edges:           {meta.get('edge_count', '?')}")
         console.print(f"  Code areas:      {meta.get('area_count', '?')}")
         console.print(f"  Communities:     {meta.get('community_count', '?')}")
+        if meta.get("min_pr_rate"):
+            line = f"  Min PR rate:     {meta.get('min_pr_rate')}"
+            if meta.get("threshold_auto_tuned") == "true":
+                line += " [dim](auto-tuned)[/dim]"
+            console.print(line)
+        if meta.get("active_author_count") and meta.get("author_count"):
+            fraction = float(meta.get("active_author_fraction", "0") or "0")
+            console.print(
+                f"  Active authors:  {meta.get('active_author_count')}/{meta.get('author_count')} "
+                f"({fraction * 100:.0f}%)"
+            )
+        if meta.get("min_active_author_fraction"):
+            threshold = float(meta.get("min_active_author_fraction", "0") or "0")
+            console.print(f"  Retention floor: {threshold * 100:.0f}%")
         if team_labels:
             console.print(f"  Team labels:     {', '.join(team_labels[k] for k in sorted(team_labels))}")
 
@@ -386,13 +405,15 @@ def export_graph(ctx: click.Context, fmt: str, output: str | None) -> None:
     config: Config = ctx.obj["config"]
 
     from social_graph.fetcher.cache import PRCache
-    from social_graph.graph.social import build_social_graph
     from social_graph.output.json_export import export_graphml, export_json
 
     cache = PRCache(config.cache_db_path)
     try:
-        prs = cache.get_all_prs()
-        edges = build_social_graph(prs)
+        if not cache.has_build_data():
+            console.print("[red]No build data found.[/red] Run [cyan]social-graph build[/cyan] first.")
+            raise SystemExit(1)
+
+        edges = cache.load_social_edges()
 
         if output is None:
             output = f"social-graph.{fmt}"
@@ -419,12 +440,55 @@ def export_graph(ctx: click.Context, fmt: str, output: str | None) -> None:
 @click.option("--since-prs", default=None, help="Fetch PRs updated since this date (e.g. '2025-01-01').")
 @click.option("--since-git", default="6 months ago", help="Git log lookback period.")
 @click.option("--limit", default=None, type=int, help="Max PRs to fetch.")
+@click.option(
+    "--min-pr-rate",
+    default=None,
+    type=float,
+    help=(
+        "Minimum authored PRs/month required to retain a contributor in the "
+        "social graph. When omitted, the default is auto-tuned downward if it "
+        "filters too aggressively."
+    ),
+)
+@click.option(
+    "--min-active-author-fraction",
+    default=0.2,
+    type=float,
+    help=(
+        "Minimum fraction of authors that must survive the PR-rate filter "
+        "before auto-tuning accepts a graph."
+    ),
+)
 @click.option("--fresh", is_flag=True, help="Ignore cache timestamps, re-fetch everything.")
 @click.option("--skip-fetch", is_flag=True, help="Skip PR fetching, rebuild from cached data only.")
 @click.pass_context
-def build(ctx: click.Context, org: str | None, repo: tuple[str, ...], repo_path: str, since_prs: str | None, since_git: str, limit: int | None, fresh: bool, skip_fetch: bool) -> None:
+def build(
+    ctx: click.Context,
+    org: str | None,
+    repo: tuple[str, ...],
+    repo_path: str,
+    since_prs: str | None,
+    since_git: str,
+    limit: int | None,
+    min_pr_rate: float | None,
+    min_active_author_fraction: float,
+    fresh: bool,
+    skip_fetch: bool,
+) -> None:
     """Fetch PR data, compute social graph, detect teams."""
-    _run_build(ctx, org, repo, repo_path, since_prs, since_git, limit, skip_fetch, fresh)
+    _run_build(
+        ctx,
+        org,
+        repo,
+        repo_path,
+        since_prs,
+        since_git,
+        limit,
+        min_pr_rate,
+        min_active_author_fraction,
+        skip_fetch,
+        fresh,
+    )
 
 
 @cli.command()
@@ -442,13 +506,57 @@ def viz(ctx: click.Context, output: str | None) -> None:
 @click.option("--since-prs", default=None, help="Fetch PRs updated since this date (e.g. '2025-01-01').")
 @click.option("--since-git", default="6 months ago", help="Git log lookback period.")
 @click.option("--limit", default=None, type=int, help="Max PRs to fetch.")
+@click.option(
+    "--min-pr-rate",
+    default=None,
+    type=float,
+    help=(
+        "Minimum authored PRs/month required to retain a contributor in the "
+        "social graph. When omitted, the default is auto-tuned downward if it "
+        "filters too aggressively."
+    ),
+)
+@click.option(
+    "--min-active-author-fraction",
+    default=0.2,
+    type=float,
+    help=(
+        "Minimum fraction of authors that must survive the PR-rate filter "
+        "before auto-tuning accepts a graph."
+    ),
+)
 @click.option("--fresh", is_flag=True, help="Ignore cache timestamps, re-fetch everything.")
 @click.option("--skip-fetch", is_flag=True, help="Skip PR fetching, rebuild from cached data only.")
 @click.option("--output", "-o", default=None, help="Output HTML file path.")
 @click.pass_context
-def run(ctx: click.Context, org: str | None, repo: tuple[str, ...], repo_path: str, since_prs: str | None, since_git: str, limit: int | None, fresh: bool, skip_fetch: bool, output: str | None) -> None:
+def run(
+    ctx: click.Context,
+    org: str | None,
+    repo: tuple[str, ...],
+    repo_path: str,
+    since_prs: str | None,
+    since_git: str,
+    limit: int | None,
+    min_pr_rate: float | None,
+    min_active_author_fraction: float,
+    fresh: bool,
+    skip_fetch: bool,
+    output: str | None,
+) -> None:
     """Build the social graph and open the visualization."""
-    _run_build(ctx, org, repo, repo_path, since_prs, since_git, limit, skip_fetch, fresh)
+    _run_build(
+        ctx,
+        org,
+        repo,
+        repo_path,
+        since_prs,
+        since_git,
+        limit,
+        min_pr_rate,
+        min_active_author_fraction,
+        skip_fetch,
+        fresh,
+    )
     console.print()
     _run_viz(ctx, output)
 
@@ -473,9 +581,27 @@ def _resolve_org_repo(repo_path: str, org: str | None, repo: tuple[str, ...]) ->
     return resolved_org, resolved_repos
 
 
-def _run_build(ctx: click.Context, org: str | None, repo: tuple[str, ...], repo_path: str, since_prs: str | None, since_git: str, limit: int | None, skip_fetch: bool = False, fresh: bool = False) -> None:
+def _run_build(
+    ctx: click.Context,
+    org: str | None,
+    repo: tuple[str, ...],
+    repo_path: str,
+    since_prs: str | None,
+    since_git: str,
+    limit: int | None,
+    min_pr_rate: float | None = None,
+    min_active_author_fraction: float = 0.2,
+    skip_fetch: bool = False,
+    fresh: bool = False,
+) -> None:
     if fresh and skip_fetch:
         console.print("[red]Error:[/red] --fresh and --skip-fetch are mutually exclusive.")
+        raise SystemExit(1)
+    if min_pr_rate is not None and min_pr_rate < 0:
+        console.print("[red]Error:[/red] --min-pr-rate must be non-negative.")
+        raise SystemExit(1)
+    if not 0 <= min_active_author_fraction <= 1:
+        console.print("[red]Error:[/red] --min-active-author-fraction must be between 0 and 1.")
         raise SystemExit(1)
 
     config: Config = ctx.obj["config"]
@@ -499,6 +625,8 @@ def _run_build(ctx: click.Context, org: str | None, repo: tuple[str, ...], repo_
         since_prs=since_prs,
         since_git=since_git,
         limit=limit,
+        min_pr_rate=min_pr_rate,
+        min_active_author_fraction=min_active_author_fraction,
         skip_fetch=skip_fetch,
         fresh=fresh,
         log=console.print,

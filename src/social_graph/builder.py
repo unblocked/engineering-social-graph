@@ -26,6 +26,8 @@ def run_build(
     since_prs: str | None = None,
     since_git: str = "6 months ago",
     limit: int | None = None,
+    min_pr_rate: float | None = None,
+    min_active_author_fraction: float = 0.2,
     skip_fetch: bool = False,
     fresh: bool = False,
     log: Callable[[str], None] = print,
@@ -66,10 +68,60 @@ def run_build(
 
         # Step 2: Build social graph
         log("[cyan]Step 2/6:[/cyan] Building social graph...")
-        from social_graph.graph.social import build_social_graph
+        from social_graph.graph.social import (
+            MIN_PRS_PER_MONTH,
+            resolve_social_graph_threshold,
+        )
 
         all_prs = cache.get_all_prs()
-        edges = build_social_graph(all_prs)
+        edges, graph_diag, graph_attempts = resolve_social_graph_threshold(
+            all_prs,
+            min_pr_rate=min_pr_rate,
+            min_active_author_fraction=min_active_author_fraction,
+        )
+        auto_tuned = min_pr_rate is None and len(graph_attempts) > 1
+
+        if min_pr_rate is not None:
+            if graph_diag.edges == 0:
+                attempted = ", ".join(f"{attempt.min_pr_rate:g}" for attempt in graph_attempts)
+                retained_pct = graph_diag.retained_fraction * 100
+                log(
+                    f"[red]Error:[/red] --min-pr-rate {min_pr_rate:g} retained only "
+                    f"{graph_diag.active_authors}/{graph_diag.total_authors} authors "
+                    f"({retained_pct:.0f}%) and produced {graph_diag.edges} edges."
+                )
+                log(
+                    "Try a lower --min-pr-rate, or omit it to let the build auto-tune "
+                    f"downward from the default {MIN_PRS_PER_MONTH:g}. "
+                    f"Attempted threshold(s): {attempted}."
+                )
+                raise SystemExit(1)
+            if graph_diag.retained_fraction < min_active_author_fraction:
+                retained_pct = graph_diag.retained_fraction * 100
+                log(
+                    f"[yellow]Warning:[/yellow] --min-pr-rate {min_pr_rate:g} retained only "
+                    f"{graph_diag.active_authors}/{graph_diag.total_authors} authors "
+                    f"({retained_pct:.0f}%), below the configured retention floor of "
+                    f"{min_active_author_fraction * 100:.0f}%. Continuing because "
+                    "--min-pr-rate was explicitly set."
+                )
+        elif auto_tuned:
+            retained_pct = graph_diag.retained_fraction * 100
+            log(
+                f"[yellow]Warning:[/yellow] Default min PR rate {MIN_PRS_PER_MONTH:g} was too aggressive "
+                "for this repo. Auto-tuned downward to "
+                f"[cyan]{graph_diag.min_pr_rate:g}[/cyan], retaining "
+                f"{graph_diag.active_authors}/{graph_diag.total_authors} authors "
+                f"({retained_pct:.0f}%) and producing {graph_diag.edges} edges."
+            )
+        elif graph_diag.total_authors and graph_diag.retained_fraction < min_active_author_fraction:
+            retained_pct = graph_diag.retained_fraction * 100
+            log(
+                f"[yellow]Warning:[/yellow] Min PR rate {graph_diag.min_pr_rate:g} retained only "
+                f"{graph_diag.active_authors}/{graph_diag.total_authors} authors "
+                f"({retained_pct:.0f}%), though the graph still produced {graph_diag.edges} edges."
+            )
+
         cache.save_social_edges(edges)
         log(f"  {len(edges)} edges.")
 
@@ -148,6 +200,12 @@ def run_build(
             "edge_count": str(len(edges)),
             "area_count": str(len(areas)),
             "community_count": str(len(communities)),
+            "min_pr_rate": str(graph_diag.min_pr_rate),
+            "active_author_count": str(graph_diag.active_authors),
+            "author_count": str(graph_diag.total_authors),
+            "active_author_fraction": f"{graph_diag.retained_fraction:.6f}",
+            "min_active_author_fraction": f"{min_active_author_fraction:.6f}",
+            "threshold_auto_tuned": str(auto_tuned).lower(),
         })
 
         log("[green]Build complete.[/green]")
