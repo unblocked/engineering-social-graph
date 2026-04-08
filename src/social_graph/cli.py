@@ -410,6 +410,129 @@ def export_graph(ctx: click.Context, fmt: str, output: str | None, min_pr_rate: 
         cache.close()
 
 
+
+
+# ---------------------------------------------------------------------------
+# suggest-reviewers
+# ---------------------------------------------------------------------------
+
+@cli.command("suggest-reviewers")
+@click.argument("paths", nargs=-1, required=True)
+@click.option("--repo-path", default=".", help="Path to the local git repo.")
+@click.option("--author", default=None, help="PR author login (auto-detected from git config).")
+@click.option("--top", default=5, help="Number of reviewers to suggest.")
+@click.option(
+    "--mode",
+    type=click.Choice(["prs", "commits"]),
+    default="prs",
+    help="Source for proximity signal: 'prs' (requires build) or 'commits' (git log only).",
+)
+@click.pass_context
+def suggest_reviewers_cmd(
+    ctx: click.Context,
+    paths: tuple[str, ...],
+    repo_path: str,
+    author: str | None,
+    top: int,
+    mode: str,
+) -> None:
+    """Suggest the best reviewers for changed files.
+
+    
+    Uses expertise scores + social graph proximity to rank reviewers.
+    Default mode (prs) requires a prior build; commit mode works from git log only.
+
+    
+    Examples:
+        social-graph suggest-reviewers src/social_graph/scoring.py
+        social-graph suggest-reviewers --mode commits src/social_graph/graph/
+        social-graph suggest-reviewers --author pwerry src/social_graph/cli.py
+    """
+    import subprocess as sp
+
+    config: Config = ctx.obj["config"]
+
+    edges = []
+    if mode == "prs":
+        from social_graph.fetcher.cache import PRCache
+
+        cache = PRCache(config.cache_db_path)
+        try:
+            if not cache.has_build_data():
+                console.print(
+                    "[red]No build data found.[/red] Run [cyan]social-graph build[/cyan] first, "
+                    "or use [cyan]--mode commits[/cyan]."
+                )
+                raise SystemExit(1)
+
+            meta = cache.load_build_meta()
+            if meta.get("mode", "pr") != "pr":
+                console.print(
+                    "[red]Cached build data was generated in commit mode.[/red] "
+                    "Run [cyan]social-graph build[/cyan] to rebuild PR-mode edges, "
+                    "or use [cyan]--mode commits[/cyan]."
+                )
+                raise SystemExit(1)
+
+            edges = cache.load_social_edges()
+        finally:
+            cache.close()
+
+    if author is not None:
+        author = author.lower()
+
+    # Auto-detect author from git config if not provided
+    if author is None:
+        result = sp.run(
+            ["git", "-C", repo_path, "config", "user.email"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            email = result.stdout.strip()
+            author = email.split("@", 1)[0]
+            if "+" in author:
+                author = author.split("+", 1)[1]
+            author = author.lower()
+
+    from social_graph.graph.reviewers import suggest_reviewers
+
+    suggestions = suggest_reviewers(
+        repo_path=repo_path,
+        changed_paths=list(paths),
+        edges=edges,
+        author_login=author,
+        top_n=top,
+        mode=mode,
+    )
+
+    if not suggestions:
+        console.print("[yellow]No reviewer candidates found for the given paths.[/yellow]")
+        return
+
+    from rich.table import Table
+
+    table = Table(title="Suggested Reviewers")
+    table.add_column("#", style="dim", justify="right")
+    table.add_column("Login", style="cyan")
+    table.add_column("Score", justify="right", style="magenta")
+    table.add_column("Expertise", justify="right")
+    table.add_column("Proximity", justify="right")
+    table.add_column("Why", style="dim")
+
+    for i, s in enumerate(suggestions, 1):
+        table.add_row(
+            str(i),
+            s["login"],
+            f"{s['score']:.3f}",
+            f"{s['expertise']:.3f}",
+            f"{s['proximity']:.3f}",
+            s["reason"],
+        )
+
+    console.print(table)
+
 # ---------------------------------------------------------------------------
 # build / viz / run — core pipeline
 # ---------------------------------------------------------------------------
