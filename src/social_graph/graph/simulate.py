@@ -534,7 +534,12 @@ def simulate_hire(
         bf_current = area.bus_factor
         existing_scores = [(e.login, e.score) for e in area.experts]
         if existing_scores:
-            median_score = sorted(e.score for e in area.experts)[len(area.experts) // 2]
+            scores = sorted(e.score for e in area.experts)
+            mid = len(scores) // 2
+            if len(scores) % 2 == 0:
+                median_score = (scores[mid - 1] + scores[mid]) / 2
+            else:
+                median_score = scores[mid]
             projected = existing_scores + [("_new_hire", median_score)]
             bf_new = _recompute_bus_factor(projected)
         else:
