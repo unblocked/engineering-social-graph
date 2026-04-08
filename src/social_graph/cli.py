@@ -419,8 +419,8 @@ def export_graph(ctx: click.Context, fmt: str, output: str | None) -> None:
 @click.option("--repo-path", default=".", help="Path to the local git repo.")
 @click.option("--author", default=None, help="PR author login (auto-detected from git config).")
 @click.option("--top", default=5, help="Number of reviewers to suggest.")
-@click.option("--mode", type=click.Choice(["prs", "commits"]), default="prs",
-              help="Source for proximity signal: 'prs' (requires build) or 'commits' (git log only).")
+@click.option("--mode", type=click.Choice(["pr", "commit"]), default="pr",
+              help="Source for proximity signal: 'pr' (requires build) or 'commit' (git log only).")
 @click.pass_context
 def suggest_reviewers_cmd(ctx: click.Context, paths: tuple[str, ...], repo_path: str, author: str | None, top: int, mode: str) -> None:
     """Suggest the best reviewers for changed files.
@@ -432,19 +432,19 @@ def suggest_reviewers_cmd(ctx: click.Context, paths: tuple[str, ...], repo_path:
     \b
     Examples:
         social-graph suggest-reviewers src/social_graph/scoring.py
-        social-graph suggest-reviewers --mode commits src/social_graph/graph/
+        social-graph suggest-reviewers --mode commit src/social_graph/graph/
         social-graph suggest-reviewers --author pwerry src/social_graph/cli.py
     """
     import subprocess as sp
     config: Config = ctx.obj["config"]
 
     edges = []
-    if mode == "prs":
+    if mode == "pr":
         from social_graph.fetcher.cache import PRCache
         cache = PRCache(config.cache_db_path)
         try:
             if not cache.has_build_data():
-                console.print("[red]No build data found.[/red] Run [cyan]social-graph build[/cyan] first, or use [cyan]--mode commits[/cyan].")
+                console.print("[red]No build data found.[/red] Run [cyan]social-graph build[/cyan] first, or use [cyan]--mode commit[/cyan].")
                 raise SystemExit(1)
             edges = cache.load_social_edges()
         finally:

@@ -382,7 +382,7 @@ class PRCache:
                     _user_to_json(c.author),
                     _dt_to_str(c.committed_at),
                     json.dumps(c.files),
-                    json.dumps([_user_to_json(u) for u in c.coauthors]),
+                    json.dumps([json.loads(_user_to_json(u)) for u in c.coauthors]),
                 )
                 for c in commits
             ],
@@ -407,7 +407,10 @@ class PRCache:
         result = []
         for r in rows:
             coauthors_raw = json.loads(r[5])
-            coauthors = tuple(_user_from_json(c) for c in coauthors_raw)
+            coauthors = tuple(
+                _user_from_json(c) if isinstance(c, str) else _user_from_json(json.dumps(c))
+                for c in coauthors_raw
+            )
             result.append(Commit(
                 sha=r[0],
                 repo=r[1],

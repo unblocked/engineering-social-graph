@@ -57,7 +57,7 @@ def run_build(
                         known_users.setdefault(interaction.user.name, interaction.user.login)
             data_count = len(all_prs)
             data_label = "pr_count"
-        else:
+        elif mode == BuildMode.COMMIT:
             all_commits = _build_commit_mode(cache, org, repos, repo_path, since_git, log)
             # Build known_users from commit data
             known_users = {}
@@ -180,6 +180,8 @@ def _build_commit_mode(cache, org, repos, repo_path, since_git, log):
     log(f"[cyan]Step 1/6:[/cyan] Fetching commits from git log (since {since_git})...")
     from social_graph.fetcher.git_log import fetch_repo_commits
 
+    if len(repos) > 1:
+        log("[yellow]Warning:[/yellow] commit mode uses a single local repo; only the first --repo is used for naming.")
     full_name = f"{org}/{repos[0]}" if repos else org
     commits = fetch_repo_commits(repo_path, repo_name=full_name, since=since_git, log=log)
     cache.delete_commits(repo=full_name)

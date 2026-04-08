@@ -42,7 +42,7 @@ def suggest_reviewers(
     edges: list[SocialEdge],
     author_login: str | None = None,
     top_n: int = 5,
-    mode: str = "prs",
+    mode: str = "pr",
 ) -> list[dict]:
     """Suggest reviewers for a set of changed file paths.
 
@@ -52,14 +52,14 @@ def suggest_reviewers(
         edges: Social graph edges (from cache).
         author_login: The PR author's login (excluded from suggestions).
         top_n: Number of reviewers to return.
-        mode: ``"prs"`` (default) uses PR edges for proximity;
-              ``"commits"`` derives proximity from git log co-commits.
+        mode: ``"pr"`` (default) uses PR edges for proximity;
+              ``"commit"`` derives proximity from git log co-commits.
 
     Returns:
         List of dicts with keys: login, score, expertise, proximity, reason.
     """
-    if mode not in ("prs", "commits"):
-        raise ValueError(f"mode must be 'prs' or 'commits', got {mode!r}")
+    if mode not in ("pr", "commit"):
+        raise ValueError(f"mode must be 'pr' or 'commit', got {mode!r}")
 
     # Build a mapping from email-prefix → GitHub login so that expertise
     # keys (email-based) can be unified with social-edge keys (GitHub logins).
@@ -92,7 +92,7 @@ def suggest_reviewers(
 
     # 2. Compute social proximity
     proximity: dict[str, float] = {}
-    if mode == "commits":
+    if mode == "commit":
         proximity = co_commit_proximity(repo_path, changed_paths, author_login)
     elif author_login:
         for edge in edges:
@@ -105,8 +105,14 @@ def suggest_reviewers(
                     proximity.get(edge.author.login, 0), edge.weight * 0.5
                 )
 
+    # Normalize proximity to [0, 1] like the other signals
+    if proximity:
+        max_prox = max(proximity.values())
+        if max_prox > 0:
+            proximity = {k: v / max_prox for k, v in proximity.items()}
+
     # 3. Compute review load
-    if mode == "commits":
+    if mode == "commit":
         norm_load = {}  # no meaningful load signal from commits alone
     else:
         review_counts: dict[str, int] = defaultdict(int)
