@@ -143,11 +143,17 @@ def _social_weight_between(
     edge_index: dict[tuple[str, str], float],
 ) -> float:
     """Bidirectional social weight between two people."""
-    w1 = edge_index.get((login_a, login_b), 0.0)
-    w2 = edge_index.get((login_b, login_a), 0.0)
-    if w1 and w2:
-        return (w1 + w2) / 2
-    return w1 or w2
+    key_ab = (login_a, login_b)
+    key_ba = (login_b, login_a)
+    has_ab = key_ab in edge_index
+    has_ba = key_ba in edge_index
+    if has_ab and has_ba:
+        return (edge_index[key_ab] + edge_index[key_ba]) / 2
+    if has_ab:
+        return edge_index[key_ab]
+    if has_ba:
+        return edge_index[key_ba]
+    return 0.0
 
 
 def _build_edge_index(edges: list[SocialEdge]) -> dict[tuple[str, str], float]:
