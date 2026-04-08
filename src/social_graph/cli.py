@@ -380,10 +380,12 @@ def experts_domains(ctx: click.Context, repo_path: str, auto_label: bool, output
 @cli.command("export")
 @click.option("--format", "fmt", type=click.Choice(["json", "graphml"]), default="json")
 @click.option("--output", "-o", default=None, help="Output file path.")
+@click.option("--min-pr-rate", default=DEFAULT_MIN_PR_RATE, type=float, help="Minimum avg PRs per month for an author/reviewer.")
 @click.pass_context
-def export_graph(ctx: click.Context, fmt: str, output: str | None) -> None:
+def export_graph(ctx: click.Context, fmt: str, output: str | None, min_pr_rate: float) -> None:
     """Export the social graph to JSON or GraphML."""
     config: Config = ctx.obj["config"]
+    config.min_pr_rate = min_pr_rate
 
     from social_graph.fetcher.cache import PRCache
     from social_graph.graph.social import build_social_graph
@@ -392,7 +394,7 @@ def export_graph(ctx: click.Context, fmt: str, output: str | None) -> None:
     cache = PRCache(config.cache_db_path)
     try:
         prs = cache.get_all_prs()
-        edges = build_social_graph(prs)
+        edges = build_social_graph(prs, min_pr_rate=config.min_pr_rate)
 
         if output is None:
             output = f"social-graph.{fmt}"
