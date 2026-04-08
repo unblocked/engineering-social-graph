@@ -110,7 +110,7 @@ def _build_grid(users: list[str], authors_of: dict[str, dict[str, float]], names
                 cells.append('<td class="cell empty"></td>')
             else:
                 cells.append(
-                    f'<td class="cell" style="background-color: rgba(0, 187, 140, {weight:.2f});" '
+                    f'<td class="cell" style="background-color: rgba(45, 212, 191, {weight:.2f});" '
                     f'title="{_esc(names[reviewer])} → {_esc(names[author])}: {weight:.3f}">'
                     f'{weight:.2f}</td>'
                 )
@@ -142,7 +142,7 @@ def _build_peer_tables(
         rows: list[str] = []
         for author_login, weight in peers:
             pct = int(weight * 100)
-            bar_color = '#50c878' if weight > 0.7 else '#4e9ee8' if weight > 0.3 else '#8b949e'
+            bar_color = '#2dd4bf' if weight > 0.7 else '#60a5fa' if weight > 0.3 else '#71717a'
             author_u = user_data.get(author_login)
             avatar = _avatar_tag(author_u, 20)
             rows.append(
@@ -150,7 +150,7 @@ def _build_peer_tables(
                 f'<td class="peer-name">{avatar}{_esc(names[author_login])}</td>'
                 f'<td class="peer-weight">'
                 f'<span class="weight-num">{weight:.3f}</span>'
-                f'<span class="bar-bg"><span class="bar-fill" style="width:{pct}%;background:{bar_color}"></span></span>'
+                f'<span class="bar-bg"><span class="bar-fill bar-animate" style="width:{pct}%;background:{bar_color}"></span></span>'
                 f'</td>'
                 f'</tr>'
             )
@@ -158,8 +158,8 @@ def _build_peer_tables(
         reviewer_u = user_data.get(reviewer)
         reviewer_avatar = _avatar_tag(reviewer_u, 24)
         sections.append(
-            f'<div class="peer-section">'
-            f'<h3>{reviewer_avatar}Peers for {_esc(names[reviewer])}</h3>'
+            f'<div class="peer-section stagger-item">'
+            f'<h3 class="peer-header">{reviewer_avatar}Peers for {_esc(names[reviewer])}</h3>'
             f'<table class="peer-table"><thead><tr>'
             f'<th>Peer (Author)</th><th>Relevance (0.0 to 1.0)</th>'
             f'</tr></thead><tbody>{"".join(rows)}</tbody></table>'
@@ -663,7 +663,9 @@ graphData.edges.forEach((e, i) => {
 });
 
 const fa2Settings = FA2.inferSettings(graph);
-fa2Settings.scalingRatio = 60; fa2Settings.edgeWeightInfluence = 1;
+const nodeCount = graph.order;
+fa2Settings.scalingRatio = nodeCount <= 5 ? 10 : 60;
+fa2Settings.edgeWeightInfluence = 1;
 FA2.assign(graph, { iterations: 300, settings: fa2Settings });
 
 // Post-layout: pull nodes toward community centroids to create clear visual groups.
@@ -704,7 +706,7 @@ graphData.edges.forEach(e => {
 const rankedTeams = communityKeys.sort((a, b) => (teamConnectivity[b] || 0) - (teamConnectivity[a] || 0));
 
 // 2. Compute team radii (how much space each team needs based on member count)
-const nodeSpacing = 200; // space between nodes within a team
+const nodeSpacing = nodeCount <= 5 ? 40 : 200; // tighter for small graphs
 const teamRadii = {};
 rankedTeams.forEach(c => {
   const n = communityNodes[c].length;
@@ -715,7 +717,7 @@ rankedTeams.forEach(c => {
 
 // 3. Place teams: first team at center, rest packed around it with no overlap
 const teamCenters = {};
-const padding = 350; // gap between team bounding circles
+const padding = nodeCount <= 5 ? 40 : 350; // tighter for small graphs
 
 if (rankedTeams.length > 0) {
   teamCenters[rankedTeams[0]] = { x: 0, y: 0 };
@@ -788,6 +790,12 @@ const renderer = new SigmaClass(graph, container, {
     ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(data.label, data.x, data.y - data.size - bh/2 - 4);
   },
 });
+
+// For small graphs, zoom camera out so nodes aren't at viewport edges
+if (nodeCount <= 5) {
+  const cam = renderer.getCamera();
+  cam.setState({ ratio: 1.8 });
+}
 
 // Build team label lookup from node data
 const teamLabels = {};
