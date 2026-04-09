@@ -438,11 +438,11 @@ def suggest_reviewers_cmd(
 ) -> None:
     """Suggest the best reviewers for changed files.
 
-    
+    \b
     Uses expertise scores + social graph proximity to rank reviewers.
     Default mode (prs) requires a prior build; commit mode works from git log only.
 
-    
+    \b
     Examples:
         social-graph suggest-reviewers src/social_graph/scoring.py
         social-graph suggest-reviewers --mode commits src/social_graph/graph/

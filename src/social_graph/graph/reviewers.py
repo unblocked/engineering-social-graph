@@ -5,7 +5,7 @@ reviewers for a given file or directory. The algorithm ranks candidates by:
 
 1. Expertise score — how well does this person know the changed code?
 2. Social proximity — how closely do they collaborate with the PR author?
-3. Review load balance — prefer reviewers who aren't already overrepresented
+3. Review load balance — prefer reviewers who are not already overrepresented
 
 The final score is a weighted combination:
     score = 0.6 * expertise + 0.3 * proximity + 0.1 * (1 - load)
@@ -22,7 +22,6 @@ from social_graph.decay import THREE_SIGMA_DAYS, days_since, exponential_time_de
 from social_graph.graph.expertise import experts_for_path
 from social_graph.models import SocialEdge
 
-# Weights for the composite reviewer score
 WEIGHT_EXPERTISE = 0.6
 WEIGHT_PROXIMITY = 0.3
 WEIGHT_LOAD_BALANCE = 0.1
@@ -30,10 +29,19 @@ WEIGHT_LOAD_BALANCE = 0.1
 
 def _login_from_email(email: str) -> str:
     """Normalize an email to a login prefix, matching GitHub noreply format."""
-    login = email.split("@")[0]
+    login = email.split("@", 1)[0]
     if "+" in login:
         login = login.split("+", 1)[1]
-    return login
+    return login.lower()
+
+
+def _normalize_login(value: str | None) -> str | None:
+    """Normalize either a login or an email to the canonical lowercase login."""
+    if not value:
+        return None
+    if "@" in value:
+        return _login_from_email(value)
+    return value.lower()
 
 
 def suggest_reviewers(
@@ -44,86 +52,74 @@ def suggest_reviewers(
     top_n: int = 5,
     mode: str = "prs",
 ) -> list[dict]:
-    """Suggest reviewers for a set of changed file paths.
-
-    Args:
-        repo_path: Path to the local git clone.
-        changed_paths: List of file/directory paths that changed.
-        edges: Social graph edges (from cache).
-        author_login: The PR author's login (excluded from suggestions).
-        top_n: Number of reviewers to return.
-        mode: ``"prs"`` (default) uses PR edges for proximity;
-              ``"commits"`` derives proximity from git log co-commits.
-
-    Returns:
-        List of dicts with keys: login, score, expertise, proximity, reason.
-    """
+    """Suggest reviewers for a set of changed file paths."""
     if mode not in ("prs", "commits"):
         raise ValueError(f"mode must be 'prs' or 'commits', got {mode!r}")
 
-    # 1. Aggregate expertise across all changed paths
+    normalized_author = _normalize_login(author_login)
+
     expertise_scores: dict[str, float] = defaultdict(float)
     expertise_counts: dict[str, int] = defaultdict(int)
 
     for path in changed_paths:
         rankings = experts_for_path(str(repo_path), path, top_n=20)
-        for r in rankings:
-            # experts_for_path returns emails as login; normalize to prefix
-            login = _login_from_email(r.user.login)
-            expertise_scores[login] += r.score
+        for ranking in rankings:
+            login = _normalize_login(ranking.user.login)
+            if login is None:
+                continue
+            expertise_scores[login] += ranking.score
             expertise_counts[login] += 1
 
-    # Normalize expertise: average across paths, then normalize to [0, 1]
-    avg_expertise: dict[str, float] = {}
-    for login, total in expertise_scores.items():
-        avg_expertise[login] = total / expertise_counts[login]
-
+    avg_expertise = {
+        login: total / expertise_counts[login]
+        for login, total in expertise_scores.items()
+    }
     max_exp = max(avg_expertise.values()) if avg_expertise else 1.0
-    norm_expertise = {k: v / max_exp for k, v in avg_expertise.items()}
+    norm_expertise = {login: score / max_exp for login, score in avg_expertise.items()}
 
-    # 2. Compute social proximity
     proximity: dict[str, float] = {}
     if mode == "commits":
-        proximity = co_commit_proximity(repo_path, changed_paths, author_login)
-    elif author_login:
+        raw_proximity = co_commit_proximity(repo_path, changed_paths, normalized_author)
+        for login, score in raw_proximity.items():
+            normalized_login = _normalize_login(login)
+            if normalized_login is None:
+                continue
+            proximity[normalized_login] = max(proximity.get(normalized_login, 0.0), score)
+    elif normalized_author:
         for edge in edges:
-            if edge.author.login == author_login:
-                proximity[edge.reviewer.login] = max(
-                    proximity.get(edge.reviewer.login, 0), edge.weight
-                )
-            if edge.reviewer.login == author_login:
-                proximity[edge.author.login] = max(
-                    proximity.get(edge.author.login, 0), edge.weight * 0.5
-                )
+            author = _normalize_login(edge.author.login)
+            reviewer = _normalize_login(edge.reviewer.login)
+            if author == normalized_author and reviewer is not None:
+                proximity[reviewer] = max(proximity.get(reviewer, 0.0), edge.weight)
+            if reviewer == normalized_author and author is not None:
+                proximity[author] = max(proximity.get(author, 0.0), edge.weight * 0.5)
 
-    # 3. Compute review load
     if mode == "commits":
-        norm_load = {}  # no meaningful load signal from commits alone
+        norm_load: dict[str, float] = {}
     else:
         review_counts: dict[str, int] = defaultdict(int)
         for edge in edges:
-            review_counts[edge.reviewer.login] += 1
+            reviewer = _normalize_login(edge.reviewer.login)
+            if reviewer is not None:
+                review_counts[reviewer] += 1
         max_reviews = max(review_counts.values()) if review_counts else 1
-        norm_load = {k: v / max_reviews for k, v in review_counts.items()}
+        norm_load = {login: count / max_reviews for login, count in review_counts.items()}
 
-    # 4. Combine scores for all candidates
-    all_candidates = set(norm_expertise.keys()) | set(proximity.keys())
-    if author_login:
-        all_candidates.discard(author_login)
+    all_candidates = set(norm_expertise) | set(proximity)
+    if normalized_author:
+        all_candidates.discard(normalized_author)
 
     results = []
     for login in all_candidates:
-        exp = norm_expertise.get(login, 0)
-        prox = proximity.get(login, 0)
-        load = norm_load.get(login, 0)
-
+        exp = norm_expertise.get(login, 0.0)
+        prox = proximity.get(login, 0.0)
+        load = norm_load.get(login, 0.0)
         score = (
             WEIGHT_EXPERTISE * exp
             + WEIGHT_PROXIMITY * prox
             + WEIGHT_LOAD_BALANCE * (1 - load)
         )
 
-        # Build a human-readable reason
         reasons = []
         if exp > 0.5:
             reasons.append("domain expert")
@@ -144,7 +140,7 @@ def suggest_reviewers(
             "reason": ", ".join(reasons) if reasons else "relevant contributor",
         })
 
-    results.sort(key=lambda r: r["score"], reverse=True)
+    results.sort(key=lambda result: result["score"], reverse=True)
     return results[:top_n]
 
 
@@ -153,30 +149,21 @@ def co_commit_proximity(
     changed_paths: list[str],
     author_login: str | None = None,
 ) -> dict[str, float]:
-    """Derive "closeness" from shared file commits.
-
-    Runs ``git log`` on each changed path, collects all committers, scores by
-    time-decayed commit frequency, and normalizes to [0, 1].
-
-    Args:
-        repo_path: Path to the local git clone.
-        changed_paths: File paths to inspect.
-        author_login: Login to exclude from results (the PR author).
-
-    Returns:
-        Mapping of login -> proximity score in [0, 1].
-    """
+    """Derive reviewer proximity from shared file commit history."""
     raw_scores: dict[str, float] = defaultdict(float)
     since = f"{THREE_SIGMA_DAYS} days ago"
+    normalized_author = _normalize_login(author_login)
 
     for path in changed_paths:
         try:
             result = subprocess.run(
                 [
-                    "git", "log",
-                    "--format=%aE\t%aI",
+                    "git",
+                    "log",
+                    "--format=%aE	%aI",
                     f"--since={since}",
-                    "--", path,
+                    "--",
+                    path,
                 ],
                 cwd=str(repo_path),
                 capture_output=True,
@@ -185,15 +172,15 @@ def co_commit_proximity(
             )
         except subprocess.TimeoutExpired:
             continue
+
         if result.returncode != 0 or not result.stdout.strip():
             continue
 
         for line in result.stdout.strip().splitlines():
-            parts = line.split("\t", 1)
+            parts = line.split("	", 1)
             if len(parts) != 2:
                 continue
             email, iso_date = parts
-
             login = _login_from_email(email)
 
             try:
@@ -203,14 +190,12 @@ def co_commit_proximity(
                 decay = 0.5
             raw_scores[login] += decay
 
-    # Exclude author
-    if author_login:
-        raw_scores.pop(author_login, None)
+    if normalized_author:
+        raw_scores.pop(normalized_author, None)
 
     if not raw_scores:
         return {}
 
-    # Normalize to [0, 1]
     max_score = max(raw_scores.values())
     if max_score == 0:
         return {}
