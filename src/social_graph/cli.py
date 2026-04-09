@@ -374,6 +374,340 @@ def experts_domains(ctx: click.Context, repo_path: str, auto_label: bool, output
 
 
 # ---------------------------------------------------------------------------
+# simulate — what-if scenario planning
+# ---------------------------------------------------------------------------
+
+@cli.group()
+def simulate() -> None:
+    """Run what-if simulations on the social graph.
+
+    \b
+    Subcommands:
+        lose   — What happens if someone leaves?
+        reorg  — What if we restructure teams?
+        hire   — Where should a new hire go?
+    """
+    pass
+
+
+@simulate.command("lose")
+@click.argument("login")
+@click.option("--top-backfills", default=3, help="Number of backfill candidates per area.")
+@click.pass_context
+def simulate_lose(ctx: click.Context, login: str, top_backfills: int) -> None:
+    """Simulate a person leaving — show impact and knowledge transfer plan.
+
+    \b
+    Examples:
+        social-graph simulate lose alice
+        social-graph simulate lose alice --top-backfills 3
+    """
+    from social_graph.fetcher.cache import PRCache
+    from social_graph.graph.simulate import simulate_departure
+
+    config: Config = ctx.obj["config"]
+    cache = PRCache(config.cache_db_path)
+    try:
+        if not cache.has_build_data():
+            console.print("[red]No build data found.[/red] Run [cyan]social-graph build[/cyan] first.")
+            raise SystemExit(1)
+
+        edges = cache.load_social_edges()
+        areas = cache.load_code_areas()
+        _, member_to_community = cache.load_communities()
+        team_labels = cache.load_team_labels()
+    finally:
+        cache.close()
+
+    # Verify the person exists
+    all_logins = set()
+    for e in edges:
+        all_logins.add(e.author.login)
+        all_logins.add(e.reviewer.login)
+    for a in areas:
+        for exp in a.experts:
+            all_logins.add(exp.login)
+
+    if login not in all_logins:
+        console.print(f"[red]Error:[/red] @{login} not found in the social graph.")
+        close_matches = [l for l in sorted(all_logins) if login.lower() in l.lower()]
+        if close_matches:
+            console.print(f"  Did you mean: {', '.join(f'@{m}' for m in close_matches[:5])}?")
+        raise SystemExit(1)
+
+    report = simulate_departure(login, areas, edges, member_to_community, team_labels)
+    _print_departure_report(report, top_backfills)
+
+
+@simulate.command("reorg")
+@click.argument("moves", nargs=-1, required=True)
+@click.pass_context
+def simulate_reorg_cmd(ctx: click.Context, moves: tuple[str, ...]) -> None:
+    """Simulate a team reorganisation — show silo and coverage impact.
+
+    Each MOVE is "login:team_number" (0-indexed).
+
+    \b
+    Examples:
+        social-graph simulate reorg alice:1 bob:1 charlie:0
+    """
+    from social_graph.fetcher.cache import PRCache
+    from social_graph.graph.simulate import simulate_reorg
+
+    config: Config = ctx.obj["config"]
+    cache = PRCache(config.cache_db_path)
+    try:
+        if not cache.has_build_data():
+            console.print("[red]No build data found.[/red] Run [cyan]social-graph build[/cyan] first.")
+            raise SystemExit(1)
+
+        edges = cache.load_social_edges()
+        areas = cache.load_code_areas()
+        communities, member_to_community = cache.load_communities()
+        team_labels = cache.load_team_labels()
+    finally:
+        cache.close()
+
+    # Parse moves
+    changes: list[tuple[str, int]] = []
+    for move in moves:
+        if ":" not in move:
+            console.print(f"[red]Error:[/red] Invalid move format: {move!r}. Expected 'login:team_number'.")
+            raise SystemExit(1)
+        login_str, team_str = move.rsplit(":", 1)
+        try:
+            team_idx = int(team_str)
+        except ValueError:
+            console.print(f"[red]Error:[/red] Invalid team number: {team_str!r}.")
+            raise SystemExit(1)
+        changes.append((login_str, team_idx))
+
+    report = simulate_reorg(changes, areas, edges, communities, member_to_community, team_labels)
+    _print_reorg_report(report, team_labels)
+
+
+@simulate.command("hire")
+@click.argument("area_paths", nargs=-1, required=True)
+@click.pass_context
+def simulate_hire_cmd(ctx: click.Context, area_paths: tuple[str, ...]) -> None:
+    """Recommend team placement and onboarding buddy for a new hire.
+
+    AREA_PATHS are code area paths (as shown in 'experts areas').
+
+    \b
+    Examples:
+        social-graph simulate hire src/api src/auth
+        social-graph simulate hire src/graph
+    """
+    from social_graph.fetcher.cache import PRCache
+    from social_graph.graph.simulate import simulate_hire
+
+    config: Config = ctx.obj["config"]
+    cache = PRCache(config.cache_db_path)
+    try:
+        if not cache.has_build_data():
+            console.print("[red]No build data found.[/red] Run [cyan]social-graph build[/cyan] first.")
+            raise SystemExit(1)
+
+        edges = cache.load_social_edges()
+        areas = cache.load_code_areas()
+        communities, member_to_community = cache.load_communities()
+        team_labels = cache.load_team_labels()
+    finally:
+        cache.close()
+
+    # Validate area paths
+    known_paths = {a.path for a in areas}
+    for path in area_paths:
+        if path not in known_paths:
+            console.print(f"[yellow]Warning:[/yellow] Area '{path}' not found in build data.")
+            close = [p for p in sorted(known_paths) if path in p]
+            if close:
+                console.print(f"  Did you mean: {', '.join(close[:5])}?")
+
+    report = simulate_hire(list(area_paths), areas, edges, communities, member_to_community, team_labels)
+    _print_hire_report(report)
+
+
+# ---------------------------------------------------------------------------
+# simulate output helpers
+# ---------------------------------------------------------------------------
+
+def _print_departure_report(report, top_backfills: int) -> None:
+    from rich.panel import Panel
+    from rich.table import Table
+
+    # Header
+    team_count = len(report.areas_affected)
+    critical = report.critical_areas
+    monopolies = len(report.knowledge_monopolies)
+
+    severity = "red" if critical > 0 else "yellow" if team_count > 0 else "green"
+    header = (
+        f"[bold]What if @{report.login} leaves?[/bold]\n\n"
+        f"  Areas affected:       [cyan]{team_count}[/cyan]\n"
+        f"  Critical (bus→0):     [{severity}]{critical}[/{severity}]\n"
+        f"  Knowledge monopolies: [{'red' if monopolies else 'green'}]{monopolies}[/{'red' if monopolies else 'green'}]\n"
+        f"  Org bus factor:       {report.org_bus_factor_before:.1f} → {report.org_bus_factor_after:.1f}"
+    )
+    console.print(Panel(header, title="Departure Impact", border_style=severity))
+
+    if not report.areas_affected:
+        console.print("[green]No code areas affected — this person has no tracked expertise.[/green]")
+        return
+
+    # Area impact table
+    table = Table(title="Code Area Impact")
+    table.add_column("Status", width=10)
+    table.add_column("Area", style="cyan")
+    table.add_column("Bus Factor", justify="center")
+    table.add_column("Top Expert After")
+
+    status_styles = {"critical": "bold red", "degraded": "yellow", "unchanged": "dim", "improved": "green"}
+    status_icons = {"critical": "CRITICAL", "degraded": "DEGRADED", "unchanged": "OK", "improved": "BETTER"}
+
+    for impact in report.areas_affected:
+        style = status_styles.get(impact.status, "")
+        icon = status_icons.get(impact.status, "?")
+        bf_str = f"{impact.bus_factor_before} → {impact.bus_factor_after}"
+        table.add_row(
+            f"[{style}]{icon}[/{style}]",
+            impact.area_name,
+            bf_str,
+            f"@{impact.top_expert_after}" if impact.top_expert_after != "—" else "[dim]none[/dim]",
+        )
+
+    console.print(table)
+    console.print()
+
+    # Backfill candidates
+    if report.backfill_candidates:
+        bf_table = Table(title="Backfill Candidates")
+        bf_table.add_column("Area", style="cyan")
+        bf_table.add_column("Candidate", style="green")
+        bf_table.add_column("Score", justify="right", style="magenta")
+        bf_table.add_column("Why", no_wrap=True)
+
+        seen_areas: dict[str, int] = {}
+        for c in report.backfill_candidates:
+            count = seen_areas.get(c.area_path, 0)
+            if count >= top_backfills:
+                continue
+            seen_areas[c.area_path] = count + 1
+            bf_table.add_row(
+                c.area_name if count == 0 else "",
+                f"@{c.login}",
+                f"{c.combined_score:.2f}",
+                c.reason,
+            )
+
+        console.print(bf_table)
+        console.print()
+
+    # Pairing sessions
+    if report.pairing_sessions:
+        ps_table = Table(title="Recommended Knowledge Transfer Sessions")
+        ps_table.add_column("Urgency", width=10)
+        ps_table.add_column("Area", style="cyan")
+        ps_table.add_column("Mentor → Mentee")
+        ps_table.add_column("Reason")
+
+        urgency_styles = {"critical": "bold red", "high": "yellow", "medium": "dim"}
+        for ps in report.pairing_sessions:
+            style = urgency_styles.get(ps.urgency, "")
+            ps_table.add_row(
+                f"[{style}]{ps.urgency.upper()}[/{style}]",
+                ps.area_name,
+                f"@{ps.mentor} → @{ps.mentee}",
+                ps.reason,
+            )
+
+        console.print(ps_table)
+
+    if report.knowledge_monopolies:
+        console.print()
+        console.print("[bold red]Knowledge Monopolies[/bold red] — these areas have NO other expert:")
+        for path in report.knowledge_monopolies:
+            console.print(f"  [red]!!![/red] {path}")
+
+
+def _print_reorg_report(report, team_labels: dict) -> None:
+    from rich.panel import Panel
+    from rich.table import Table
+
+    # Moves summary
+    moves_str = "\n".join(
+        f"  @{c.login}: {c.from_team} → {c.to_team}"
+        for c in report.changes
+    )
+    silo_delta = report.silo_score_after - report.silo_score_before
+    silo_color = "red" if silo_delta > 0 else "green" if silo_delta < 0 else "dim"
+
+    header = (
+        f"[bold]Reorg Simulation[/bold]\n\n"
+        f"{moves_str}\n\n"
+        f"  Cross-team edges:  {report.cross_team_edges_before} → {report.cross_team_edges_after}\n"
+        f"  Silo score:        [{silo_color}]{report.silo_score_before:.0%} → {report.silo_score_after:.0%}[/{silo_color}]"
+    )
+    border = "red" if report.warnings else "green"
+    console.print(Panel(header, title="Reorg Impact", border_style=border))
+
+    if report.areas_affected:
+        table = Table(title="Area Team Diversity Changes")
+        table.add_column("Status", width=10)
+        table.add_column("Area", style="cyan")
+        table.add_column("Teams Covering", justify="center")
+
+        for impact in report.areas_affected:
+            style = {"improved": "green", "degraded": "yellow", "unchanged": "dim"}.get(impact.status, "")
+            icon = {"improved": "BETTER", "degraded": "WORSE", "unchanged": "SAME"}.get(impact.status, "?")
+            table.add_row(
+                f"[{style}]{icon}[/{style}]",
+                impact.area_name,
+                f"{impact.teams_before} → {impact.teams_after}",
+            )
+        console.print(table)
+
+    if report.warnings:
+        console.print()
+        console.print("[bold yellow]Warnings[/bold yellow]")
+        for w in report.warnings:
+            console.print(f"  [yellow]![/yellow] {w}")
+
+
+def _print_hire_report(report) -> None:
+    from rich.table import Table
+
+    if not report.placements:
+        console.print("[yellow]No matching code areas found for the given paths.[/yellow]")
+        return
+
+    table = Table(title="New Hire Placement Recommendations")
+    table.add_column("Area", style="cyan")
+    table.add_column("Team", style="green")
+    table.add_column("Buddy", style="cyan")
+    table.add_column("Bus Factor", justify="center")
+    table.add_column("Why", no_wrap=True)
+
+    for p in report.placements:
+        table.add_row(
+            p.target_area_name,
+            p.recommended_team,
+            f"@{p.onboarding_buddy} ({p.buddy_expertise:.0%})",
+            p.bus_factor_improvement,
+            p.reason,
+        )
+
+    console.print(table)
+
+    if report.org_bus_factor_improvement > 0:
+        console.print(
+            f"\n[green]Expected org-wide bus factor improvement: "
+            f"+{report.org_bus_factor_improvement:.1f}[/green]"
+        )
+
+
+# ---------------------------------------------------------------------------
 # export
 # ---------------------------------------------------------------------------
 
