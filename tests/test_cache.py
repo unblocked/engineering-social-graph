@@ -6,6 +6,7 @@ from pathlib import Path
 
 from social_graph.fetcher.cache import PRCache
 from social_graph.models import (
+    Commit,
     Interaction,
     InteractionType,
     PullRequest,
@@ -29,6 +30,18 @@ def _make_test_pr() -> PullRequest:
         interactions=[
             Interaction(user=reviewer, type=InteractionType.REVIEW, created_at=now),
         ],
+    )
+
+
+def _make_test_commit() -> Commit:
+    now = datetime.now(timezone.utc)
+    return Commit(
+        sha="abc123",
+        repo="org/repo",
+        author=User(id="alice", login="alice", name="Alice"),
+        committed_at=now,
+        files=("src/main.py", "README.md"),
+        coauthors=(User(id="bob", login="bob", name="Bob"),),
     )
 
 
@@ -141,5 +154,25 @@ def test_has_build_data_depends_on_completed_build_metadata():
         })
 
         assert cache.has_build_data()
+
+        cache.close()
+
+
+def test_commit_round_trip():
+    with tempfile.TemporaryDirectory() as tmp:
+        cache = PRCache(Path(tmp) / "test.db")
+        commit = _make_test_commit()
+
+        cache.upsert_commit(commit)
+
+        commits = cache.get_all_commits(repo="org/repo")
+        assert len(commits) == 1
+        assert commits[0].sha == "abc123"
+        assert commits[0].author.login == "alice"
+        assert commits[0].files == ("src/main.py", "README.md")
+        assert commits[0].coauthors[0].login == "bob"
+
+        cache.delete_commits("org/repo")
+        assert cache.get_all_commits(repo="org/repo") == []
 
         cache.close()

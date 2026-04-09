@@ -9,6 +9,7 @@ import click
 from rich.console import Console
 
 from social_graph.config import DEFAULT_MIN_PR_RATE, Config, resolve_github_remote, secrets_set
+from social_graph.models import BuildMode
 
 console = Console()
 
@@ -380,21 +381,20 @@ def experts_domains(ctx: click.Context, repo_path: str, auto_label: bool, output
 @cli.command("export")
 @click.option("--format", "fmt", type=click.Choice(["json", "graphml"]), default="json")
 @click.option("--output", "-o", default=None, help="Output file path.")
-@click.option("--min-pr-rate", default=DEFAULT_MIN_PR_RATE, type=float, help="Minimum avg PRs per month for an author/reviewer.")
 @click.pass_context
-def export_graph(ctx: click.Context, fmt: str, output: str | None, min_pr_rate: float) -> None:
-    """Export the social graph to JSON or GraphML."""
+def export_graph(ctx: click.Context, fmt: str, output: str | None) -> None:
+    """Export the cached social graph to JSON or GraphML."""
     config: Config = ctx.obj["config"]
-    config.min_pr_rate = min_pr_rate
 
     from social_graph.fetcher.cache import PRCache
-    from social_graph.graph.social import build_social_graph
     from social_graph.output.json_export import export_graphml, export_json
 
     cache = PRCache(config.cache_db_path)
     try:
-        prs = cache.get_all_prs()
-        edges = build_social_graph(prs, min_pr_rate=config.min_pr_rate)
+        if not cache.has_build_data():
+            console.print("[red]No build data found.[/red] Run [cyan]social-graph build[/cyan] first.")
+            raise SystemExit(1)
+        edges = cache.load_social_edges()
 
         if output is None:
             output = f"social-graph.{fmt}"
@@ -415,6 +415,8 @@ def export_graph(ctx: click.Context, fmt: str, output: str | None, min_pr_rate: 
 # ---------------------------------------------------------------------------
 
 @cli.command()
+@click.option("--mode", "mode_str", type=click.Choice(["pr", "commit"]), default="pr",
+              help="Data source: 'pr' (GitHub PRs), 'commit' (git log).")
 @click.option("--org", default=None, help="GitHub organization (auto-detected from git remote).")
 @click.option("--repo", multiple=True, help="Repository name (auto-detected from git remote).")
 @click.option("--repo-path", default=".", help="Path to local git repo clone (default: current directory).")
@@ -425,10 +427,10 @@ def export_graph(ctx: click.Context, fmt: str, output: str | None, min_pr_rate: 
 @click.option("--skip-fetch", is_flag=True, help="Skip PR fetching, rebuild from cached data only.")
 @click.option("--min-pr-rate", default=DEFAULT_MIN_PR_RATE, type=float, help="Minimum avg PRs per month for an author/reviewer.")
 @click.pass_context
-def build(ctx: click.Context, org: str | None, repo: tuple[str, ...], repo_path: str, since_prs: str | None, since_git: str, limit: int | None, fresh: bool, skip_fetch: bool, min_pr_rate: float) -> None:
-    """Fetch PR data, compute social graph, detect teams."""
+def build(ctx: click.Context, mode_str: str, org: str | None, repo: tuple[str, ...], repo_path: str, since_prs: str | None, since_git: str, limit: int | None, fresh: bool, skip_fetch: bool, min_pr_rate: float) -> None:
+    """Fetch PR data or parse commits, compute social graph, detect teams."""
     ctx.obj["config"].min_pr_rate = min_pr_rate
-    _run_build(ctx, org, repo, repo_path, since_prs, since_git, limit, skip_fetch, fresh)
+    _run_build(ctx, org, repo, repo_path, since_prs, since_git, limit, skip_fetch, fresh, mode_str=mode_str)
 
 
 @cli.command()
@@ -440,6 +442,8 @@ def viz(ctx: click.Context, output: str | None) -> None:
 
 
 @cli.command()
+@click.option("--mode", "mode_str", type=click.Choice(["pr", "commit"]), default="pr",
+              help="Data source: 'pr' (GitHub PRs), 'commit' (git log).")
 @click.option("--org", default=None, help="GitHub organization (auto-detected from git remote).")
 @click.option("--repo", multiple=True, help="Repository name (auto-detected from git remote).")
 @click.option("--repo-path", default=".", help="Path to local git repo clone (default: current directory).")
@@ -451,10 +455,10 @@ def viz(ctx: click.Context, output: str | None) -> None:
 @click.option("--output", "-o", default=None, help="Output HTML file path.")
 @click.option("--min-pr-rate", default=DEFAULT_MIN_PR_RATE, type=float, help="Minimum avg PRs per month for an author/reviewer.")
 @click.pass_context
-def run(ctx: click.Context, org: str | None, repo: tuple[str, ...], repo_path: str, since_prs: str | None, since_git: str, limit: int | None, fresh: bool, skip_fetch: bool, output: str | None, min_pr_rate: float) -> None:
+def run(ctx: click.Context, mode_str: str, org: str | None, repo: tuple[str, ...], repo_path: str, since_prs: str | None, since_git: str, limit: int | None, fresh: bool, skip_fetch: bool, output: str | None, min_pr_rate: float) -> None:
     """Build the social graph and open the visualization."""
     ctx.obj["config"].min_pr_rate = min_pr_rate
-    _run_build(ctx, org, repo, repo_path, since_prs, since_git, limit, skip_fetch, fresh)
+    _run_build(ctx, org, repo, repo_path, since_prs, since_git, limit, skip_fetch, fresh, mode_str=mode_str)
     console.print()
     _run_viz(ctx, output)
 
@@ -479,7 +483,9 @@ def _resolve_org_repo(repo_path: str, org: str | None, repo: tuple[str, ...]) ->
     return resolved_org, resolved_repos
 
 
-def _run_build(ctx: click.Context, org: str | None, repo: tuple[str, ...], repo_path: str, since_prs: str | None, since_git: str, limit: int | None, skip_fetch: bool = False, fresh: bool = False) -> None:
+def _run_build(ctx: click.Context, org: str | None, repo: tuple[str, ...], repo_path: str, since_prs: str | None, since_git: str, limit: int | None, skip_fetch: bool = False, fresh: bool = False, mode_str: str = "pr") -> None:
+    mode = BuildMode(mode_str)
+
     if fresh and skip_fetch:
         console.print("[red]Error:[/red] --fresh and --skip-fetch are mutually exclusive.")
         raise SystemExit(1)
@@ -488,12 +494,15 @@ def _run_build(ctx: click.Context, org: str | None, repo: tuple[str, ...], repo_
     if not config.anthropic_api_key:
         console.print("[yellow]Note:[/yellow] No Anthropic API key — team labels will use code area names instead of AI.")
         console.print("  Run [cyan]social-graph auth --anthropic KEY[/cyan] to enable AI labels.\n")
-    if not skip_fetch and not config.github_token:
+    if mode == BuildMode.PR and not skip_fetch and not config.github_token:
         console.print("[red]Error:[/red] No GitHub token found.")
         console.print("Run [cyan]social-graph auth --github TOKEN[/cyan] or authenticate with [cyan]gh auth login[/cyan].")
         raise SystemExit(1)
 
     resolved_org, resolved_repos = _resolve_org_repo(repo_path, org, repo)
+    if mode == BuildMode.COMMIT and len(resolved_repos) != 1:
+        console.print("[red]Error:[/red] Commit mode currently supports exactly one repository. Run separate builds per repo.")
+        raise SystemExit(1)
 
     from social_graph.builder import run_build
 
@@ -502,6 +511,7 @@ def _run_build(ctx: click.Context, org: str | None, repo: tuple[str, ...], repo_
         org=resolved_org,
         repos=resolved_repos,
         repo_path=repo_path,
+        mode=mode,
         since_prs=since_prs,
         since_git=since_git,
         limit=limit,

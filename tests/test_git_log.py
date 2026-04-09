@@ -49,3 +49,7 @@ def test_co_author_regex_multiple():
     assert len(matches) == 2
     assert matches[0] == ("Alice", "a@x.com")
     assert matches[1] == ("Bob", "b@x.com")
+
+
+def test_login_from_mixed_case_email_is_lowercased():
+    assert _login_from_email("Alice@example.com") == "alice"

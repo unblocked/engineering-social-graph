@@ -24,7 +24,7 @@ def _login_from_email(email: str) -> str:
     prefix = email.split("@")[0]
     if "+" in prefix:
         prefix = prefix.split("+", 1)[1]
-    return prefix
+    return prefix.lower()
 
 
 def _user_from_git(name: str, email: str) -> User:
