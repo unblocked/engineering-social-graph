@@ -883,7 +883,7 @@ const renderer = new SigmaClass(graph, container, {
     const hn = highlightNode();
     const neigh = highlightNeighbors();
     if (hn) {
-      if (hn !== node && (!neigh || !neigh.has(node))) { res.color = '#222'; res.label = ''; }
+      if (hn !== node && (!neigh || !neigh.has(node))) { res.color = '#333'; res.label = ''; res.zIndex = 0; }
       else { res.label = data.label; res.zIndex = 1; }
     }
     return res;
@@ -891,7 +891,7 @@ const renderer = new SigmaClass(graph, container, {
   edgeReducer: (edge, data) => {
     const res = { ...data };
     const hn = highlightNode();
-    if (hn) { if (!graph.extremities(edge).includes(hn)) res.hidden = true; else { res.color = '#fff'; res.forceLabel = true; } }
+    if (hn) { if (!graph.extremities(edge).includes(hn)) { res.color = '#1a1a1a'; res.zIndex = 0; } else { res.color = '#fff'; res.forceLabel = true; res.zIndex = 1; } }
     return res;
   },
   defaultDrawNodeHover: (ctx, data) => {
@@ -998,26 +998,42 @@ function findMatchingNode(rawQuery) {
   };
 }
 
-function moveCameraToNode(nodeId) {
-  const attrs = graph.getNodeAttributes(nodeId);
-  const cam = renderer.getCamera();
-  const state = cam.getState();
-  const targetRatio = Math.max(0.12, Math.min(state.ratio * 0.5, 0.45));
-  const target = { ...state, x: attrs.x, y: attrs.y, ratio: targetRatio };
-  if (typeof cam.animate === 'function') {
-    cam.animate(target, { duration: 480 });
-  } else {
-    cam.setState(target);
-    renderer.refresh();
-  }
-}
-
 function applyGraphFocus(nodeId) {
   focusNode = nodeId;
   focusNeighbors = new Set(graph.neighbors(nodeId));
   showNodeDetails(nodeId);
-  moveCameraToNode(nodeId);
-  renderer.refresh({ skipIndexation: true });
+  renderer.refresh();
+  const attrs = graph.getNodeAttributes(nodeId);
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  graph.forEachNode((_, a) => {
+    if (a.x < minX) minX = a.x; if (a.x > maxX) maxX = a.x;
+    if (a.y < minY) minY = a.y; if (a.y > maxY) maxY = a.y;
+  });
+  const pad = 0.05;
+  const nx = pad + (1 - 2 * pad) * (attrs.x - minX) / (maxX - minX || 1);
+  const ny = pad + (1 - 2 * pad) * (attrs.y - minY) / (maxY - minY || 1);
+  const cam = renderer.getCamera();
+  const state = cam.getState();
+  const dist = Math.sqrt((nx - state.x) ** 2 + (ny - state.y) ** 2);
+  const alreadyZoomedIn = state.ratio < 0.8;
+  const peakRatio = alreadyZoomedIn ? state.ratio + dist * 1.2 : state.ratio;
+  const targetRatio = 0.55;
+  const steps = 60;
+  const duration = 900;
+  const interval = duration / steps;
+  let step = 0;
+  function tick() {
+    step++;
+    const t = step / steps;
+    const ease = t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2;
+    const x = state.x + (nx - state.x) * ease;
+    const y = state.y + (ny - state.y) * ease;
+    const arc = Math.sin(t * Math.PI);
+    const ratio = targetRatio + (peakRatio - targetRatio) * arc * (1 - t) + (state.ratio - targetRatio) * (1 - ease);
+    cam.setState({ x, y, ratio, angle: 0 });
+    if (step < steps) setTimeout(tick, interval);
+  }
+  tick();
 }
 
 function clearGraphFocus() {
@@ -1027,7 +1043,9 @@ function clearGraphFocus() {
   const input = document.getElementById('graph-person-search');
   if (input) input.value = '';
   document.getElementById('sigma-node-info').style.display = 'none';
-  renderer.refresh({ skipIndexation: true });
+  renderer.refresh();
+  const cam = renderer.getCamera();
+  cam.animate({ x: 0.5, y: 0.5, ratio: 1 }, { duration: 400 });
 }
 
 function focusFromSearch() {
