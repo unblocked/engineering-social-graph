@@ -712,34 +712,45 @@ def _print_hire_report(report) -> None:
 # ---------------------------------------------------------------------------
 
 @cli.command("export")
-@click.option("--format", "fmt", type=click.Choice(["json", "graphml"]), default="json")
-@click.option("--output", "-o", default=None, help="Output file path.")
+@click.option("--format", "fmt", type=click.Choice(["json", "graphml", "csv"]), default="json")
+@click.option("--output", "-o", default=None, help="Output file path (or directory for CSV).")
 @click.option("--min-pr-rate", default=DEFAULT_MIN_PR_RATE, type=float, help="Minimum avg PRs per month for an author/reviewer.")
 @click.pass_context
 def export_graph(ctx: click.Context, fmt: str, output: str | None, min_pr_rate: float) -> None:
-    """Export the social graph to JSON or GraphML."""
+    """Export the social graph to JSON, GraphML, or CSV."""
     config: Config = ctx.obj["config"]
     config.min_pr_rate = min_pr_rate
 
     from social_graph.fetcher.cache import PRCache
     from social_graph.graph.social import build_social_graph
-    from social_graph.output.json_export import export_graphml, export_json
+    from social_graph.output.json_export import export_csv, export_graphml, export_json
 
     cache = PRCache(config.cache_db_path)
     try:
         prs = cache.get_all_prs()
         edges = build_social_graph(prs, min_pr_rate=config.min_pr_rate)
 
-        if output is None:
-            output = f"social-graph.{fmt}"
-        out_path = Path(output)
-
-        if fmt == "json":
-            export_json(edges, out_path)
+        if fmt == "csv":
+            out_dir = Path(output or "social-graph-data")
+            areas = cache.load_code_areas()
+            communities, member_to_community = cache.load_communities()
+            team_labels = cache.load_team_labels()
+            export_csv(edges, areas, communities, team_labels, member_to_community, out_dir)
+            console.print(
+                f"Exported {len(edges)} edges, {len(areas)} areas, "
+                f"{len(communities)} teams to [green]{out_dir}/[/green]"
+            )
         else:
-            export_graphml(edges, out_path)
+            if output is None:
+                output = f"social-graph.{fmt}"
+            out_path = Path(output)
 
-        console.print(f"Exported {len(edges)} edges to [green]{out_path}[/green]")
+            if fmt == "json":
+                export_json(edges, out_path)
+            else:
+                export_graphml(edges, out_path)
+
+            console.print(f"Exported {len(edges)} edges to [green]{out_path}[/green]")
     finally:
         cache.close()
 
