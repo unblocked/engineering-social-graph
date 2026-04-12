@@ -124,6 +124,49 @@ def test_merged_pr_counts():
         cache.close()
 
 
+def test_clear_last_synced():
+    with tempfile.TemporaryDirectory() as tmp:
+        cache = PRCache(Path(tmp) / "test.db")
+
+        now = datetime.now(timezone.utc)
+        cache.set_last_synced("org/repo", now)
+        assert cache.get_last_synced("org/repo") is not None
+
+        cache.clear_last_synced("org/repo")
+        assert cache.get_last_synced("org/repo") is None
+
+        cache.close()
+
+
+def test_get_max_pr_updated_at():
+    with tempfile.TemporaryDirectory() as tmp:
+        cache = PRCache(Path(tmp) / "test.db")
+
+        # No PRs → None
+        assert cache.get_max_pr_updated_at("org/repo") is None
+
+        author = User(id="1", login="alice")
+        early = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        late = datetime(2026, 6, 1, tzinfo=timezone.utc)
+
+        cache.upsert_pr(PullRequest(
+            number=1, repo="org/repo", author=author,
+            state=PullRequestState.MERGED, created_at=early, updated_at=early,
+        ))
+        cache.upsert_pr(PullRequest(
+            number=2, repo="org/repo", author=author,
+            state=PullRequestState.MERGED, created_at=late, updated_at=late,
+        ))
+
+        result = cache.get_max_pr_updated_at("org/repo")
+        assert result == late
+
+        # Different repo returns None
+        assert cache.get_max_pr_updated_at("other/repo") is None
+
+        cache.close()
+
+
 def test_has_build_data_depends_on_completed_build_metadata():
     with tempfile.TemporaryDirectory() as tmp:
         cache = PRCache(Path(tmp) / "test.db")
