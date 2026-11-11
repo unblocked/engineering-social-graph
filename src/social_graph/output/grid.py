@@ -903,71 +903,65 @@ const renderer = new SigmaClass(graph, container, {
   },
 });
 
-// Build team label lookup from node data
-const teamLabels = {};
-const teamColors = {};
-graphData.nodes.forEach(n => {
-  if (!teamColors[n.community]) teamColors[n.community] = n.color;
-});
+// Overlay sizes in px at the initial zoom (ratio 1). Graph units won't do: Sigma fits the
+// graph's extent to the container, so a graph unit is 3px on a tiny graph and 0.1px on a big one.
+const TEAM_CIRCLE_PAD_PX = 50;
+const TEAM_LABEL_PX = 11;
+const MIN_LABEL_PX = 6;  // hide team labels below this, like Sigma's labelRenderedSizeThreshold
+
+// Team circles come straight from the layout: members sit on a ring of teamRadii[c] around teamCenters[c]
+const teams = rankedTeams.map(c => ({
+  center: teamCenters[c],
+  ringRadius: teamRadii[c],
+  color: graph.getNodeAttribute(communityNodes[c][0], 'color'),
+  label: (graphData.teamLabels || {})[c],
+}));
+
+function pxPerGraphUnit() {
+  const a = renderer.graphToViewport({ x: 0, y: 0 }), b = renderer.graphToViewport({ x: 1, y: 0 });
+  return Math.hypot(b.x - a.x, b.y - a.y);
+}
 
 function drawOverlay() {
   const ctx = renderer.getCanvases().mouse.getContext('2d');
   ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
 
-  // Draw bounding circles per community
-  const clusterData = {};
-  graph.forEachNode((nodeId, attrs) => {
-    const n = graphData.nodes.find(nd => nd.id === nodeId);
-    if (!n) return;
-    const pos = renderer.graphToViewport({ x: attrs.x, y: attrs.y });
-    const c = n.community;
-    if (!clusterData[c]) clusterData[c] = { positions: [], color: n.color };
-    clusterData[c].positions.push(pos);
-  });
+  // Follow Sigma's zoom rules: positions scale with 1/ratio, node sizes with 1/sqrt(ratio) (scaleSize)
+  const ratio = renderer.getCamera().ratio;
+  const unit = pxPerGraphUnit();
+  const padPx = TEAM_CIRCLE_PAD_PX / ratio;
+  // Team labels shrink with their circle (no pile-up when zoomed out) but grow no faster
+  // than the nodes (they don't swamp people's names when zoomed in)
+  const fontPx = Math.round(Math.min(TEAM_LABEL_PX / ratio, renderer.scaleSize(TEAM_LABEL_PX)) * 2) / 2;
+  ctx.font = '600 ' + fontPx + 'px Geist, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'bottom';
 
-  const teamLabels = graphData.teamLabels || {};
-  for (const [c, data] of Object.entries(clusterData)) {
-    const positions = data.positions;
-    // Compute centroid
-    let cx = 0, cy = 0;
-    positions.forEach(p => { cx += p.x; cy += p.y; });
-    cx /= positions.length; cy /= positions.length;
-    // Compute radius: max distance from centroid + padding
-    let maxR = 0;
-    positions.forEach(p => {
-      const d = Math.sqrt((p.x - cx) ** 2 + (p.y - cy) ** 2);
-      if (d > maxR) maxR = d;
-    });
-    const r = maxR + 50;
-    // Filled circle
-    ctx.fillStyle = data.color + '08';
+  for (const t of teams) {
+    const { x, y } = renderer.graphToViewport(t.center);
+    const r = t.ringRadius * unit + padPx;
+    ctx.fillStyle = t.color + '08';
     ctx.beginPath();
-    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.arc(x, y, r, 0, Math.PI * 2);
     ctx.fill();
-    // Border
-    ctx.strokeStyle = data.color + '20';
+    ctx.strokeStyle = t.color + '20';
     ctx.lineWidth = 1.5;
     ctx.stroke();
-    // Team label at top of circle
-    const label = teamLabels[c] || '';
-    if (label) {
-      ctx.font = '600 11px Geist, sans-serif';
-      ctx.fillStyle = data.color + 'BB';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'bottom';
-      ctx.fillText(label, cx, cy - r - 6);
+    if (t.label && fontPx >= MIN_LABEL_PX) {
+      ctx.fillStyle = t.color + 'BB';
+      ctx.fillText(t.label, x, y - r - fontPx / 2);
     }
   }
 
-  // Draw avatars on top
-  graph.forEachNode((nodeId, attrs) => {
-    const img = avatarImages.get(nodeId); if (!img) return;
-    const pos = renderer.graphToViewport({ x: attrs.x, y: attrs.y });
-    const s = attrs.size / renderer.getCamera().ratio;
-    if (s < 3) return;
-    ctx.save(); ctx.beginPath(); ctx.arc(pos.x, pos.y, s, 0, Math.PI * 2); ctx.closePath(); ctx.clip();
-    ctx.drawImage(img, pos.x - s, pos.y - s, s * 2, s * 2); ctx.restore();
-    ctx.beginPath(); ctx.arc(pos.x, pos.y, s, 0, Math.PI * 2); ctx.strokeStyle = attrs.color; ctx.lineWidth = 2; ctx.stroke();
+  // Avatars on top, with the same radius Sigma gives the node disc
+  graph.forEachNode((id, attrs) => {
+    const img = avatarImages.get(id);
+    const r = renderer.scaleSize(attrs.size);
+    if (!img || r < 3) return;
+    const { x, y } = renderer.graphToViewport(attrs);
+    ctx.save(); ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.closePath(); ctx.clip();
+    ctx.drawImage(img, x - r, y - r, r * 2, r * 2); ctx.restore();
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.strokeStyle = attrs.color; ctx.lineWidth = 2; ctx.stroke();
   });
 }
 renderer.on('afterRender', drawOverlay);
